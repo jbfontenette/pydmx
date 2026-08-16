@@ -1,0 +1,12 @@
+# The PATCH: one line per physical fixture. Adding another identical unit is
+# one line; repatching is one number.
+#
+# Keep names globbable -- scenes.csv can target "wash*" to hit all four at
+# once, so a consistent prefix per fixture group saves a lot of typing.
+fixture,profile,address
+par1,rootpar6,1
+par2,rootpar6,17
+par3,rootpar6,33
+par4,rootpar6,49
+disco1,pst10,65
+disco2,pst10,81

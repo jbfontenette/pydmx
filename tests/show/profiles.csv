@@ -1,0 +1,13 @@
+# Test rig. Values chosen so assertions are unambiguous:
+#   par has a colour wheel, bar does not (tests globs across mixed models)
+#   'red' is 10 on par and 15 on bar (tests per-profile value resolution)
+profile,feature,offset,mode,values
+par,dimmer,1,fade,off=0;full=255
+par,red,2,fade,
+par,green,3,fade,
+par,blue,4,fade,
+par,colour,5,snap,off=0;red=10;amber=8-15;green=42
+par,strobe,6,snap,off=0;slow=10-100
+bar,dimmer,1,fade,off=0;full=255
+bar,red,2,fade,
+bar,colour,3,snap,off=0;red=15;blue=35

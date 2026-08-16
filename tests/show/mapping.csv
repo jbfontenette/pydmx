@@ -1,0 +1,11 @@
+pad,type,target,mode,colour,shift
+r0c0,scene,warm,toggle,red,
+r0c1,scene,half,flash,blue,
+r0c2,scene,warm,solo,green,yes
+r1c0,chaser,timed,toggle,cyan,
+r1c1,chaser_step,,,white,
+t1,clear,,,red,
+s1,reload,,,cyan,
+f9,master
+f1,level,par*.dimmer
+f2,scale,par*.dimmer

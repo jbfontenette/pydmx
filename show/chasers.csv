@@ -1,0 +1,57 @@
+# Chasers: ordered sequences of scenes.
+#
+#   chaser        name, referenced from mapping.csv
+#   step          ordering number. Steps are sorted by this, NOT by file
+#                 order, so you can insert 15 between 10 and 20 without
+#                 renumbering anything.
+#   scene         a scene name from scenes.csv
+#   duration_ms   auto-advance after this long.
+#                 0 or blank = HOLD until something advances it: a pad
+#                 bound as type 'chaser_step', or a beat.
+#   beats         advance after this many beats of an external clock.
+#                 Parsed and counted, but nothing feeds beats yet -- this
+#                 is here so OS2L from Virtual DJ can be added without
+#                 rewriting this file.
+#
+# A chaser with every duration_ms at 0 is fully manual. A chaser with
+# durations set can STILL be tapped forward early -- a manual advance always
+# works, it just resets that step's timer.
+#
+# In mapping.csv:
+#   pad,type,target,mode,colour
+#   r2c0,chaser,colour_walk,toggle,cyan     start/stop. mode applies:
+#                                           toggle | solo | flash
+#   r3c0,chaser_step,colour_walk,,white     advance THIS chaser one step
+#   r3c7,chaser_step,,,amber                advance EVERY running chaser
+#
+# Leave mode BLANK on chaser_step -- it fires once on press and never reads
+# the column, so writing "toggle" there only implies a latch that does not
+# exist. Same for clear and reload.
+chaser,step,scene,duration_ms,beats
+colour_walk,10,disco_red,800,
+colour_walk,20,disco_green,800,
+colour_walk,30,disco_blue,800,
+
+# Fully manual: holds each step until a 'chaser_step' pad is tapped.
+manual_walk,10,disco_red,0,
+manual_walk,20,disco_green,0,
+manual_walk,30,disco_blue,0,
+
+# Mixed: two quick automatic steps, then a hold until you tap.
+punch,10,disco_on,150,
+punch,20,disco_off,150,
+punch,30,disco_mid,0,
+
+# Beat-synced: EVERY step declares beats, so position is derived from the
+# track's beat number rather than counted. 1 beat per step over 4 steps means
+# one full cycle per bar. Survives pause, seek and deck changes in phase.
+beatwalk,10,disco_red,,1
+beatwalk,20,disco_green,,1
+beatwalk,30,disco_blue,,1
+beatwalk,40,disco_on,,1
+
+# 4 beats per step = one step per bar, a full cycle per 4-bar phrase.
+barwalk,10,disco_red,,4
+barwalk,20,disco_green,,4
+barwalk,30,disco_blue,,4
+barwalk,40,disco_mid,,4

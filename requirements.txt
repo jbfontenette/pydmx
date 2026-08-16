@@ -1,0 +1,7 @@
+# Hardware I/O only. The core logic modules (showfile, engine, colours,
+# tempo, os2l, monitor, simlink) are stdlib-only, which is why the test
+# suite runs with none of this installed.
+pyserial>=3.5          # DMX output over the FTDI adapter
+mido>=1.3              # MIDI
+python-rtmidi>=1.5     # mido's backend
+zeroconf>=0.130        # optional: DNS-SD advertisement for OS2L

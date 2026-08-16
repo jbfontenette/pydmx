@@ -1,0 +1,8 @@
+scene,fixture,feature,value
+warm,par*,dimmer,255
+warm,par*,red,200
+red_all,*,colour,red
+half,par1,dimmer,128
+colour_a,par1,colour,10
+colour_b,par1,colour,42
+zeros,par1,dimmer,0

@@ -1,0 +1,10 @@
+chaser,step,scene,duration_ms,beats
+timed,10,warm,500,
+timed,20,half,500,
+beatsync,10,colour_a,,1
+beatsync,20,colour_b,,1
+beatsync,30,warm,,2
+mixed,10,warm,500,
+mixed,20,half,,4
+manual,10,warm,,
+manual,20,half,,

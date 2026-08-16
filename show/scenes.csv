@@ -1,0 +1,34 @@
+# Scenes are SPARSE -- list only what the scene touches. Everything else
+# contributes nothing, which is what lets scenes stack later.
+#
+# The value column accepts a number OR a named value from profiles.csv --
+# "red" and 15 are both fine, and you can mix them freely. Names resolve to
+# the middle of their range, so they survive a re-patch better than numbers.
+#
+# The fixture column accepts a glob: "wash*" hits wash1..wash4, "*" hits all.
+scene,fixture,feature,value
+par100,par*,dimmer,255
+par75,par*,dimmer,191
+par50,par*,dimmer,127
+par25,par*,dimmer,63
+par0,par*,dimmer,0
+par_color_off,par*,colors,off
+par_red,par*,colors,red
+par_all,par*,dimmer,255
+par_12,par1,dimmer,255
+par_12,par2,dimmer,255
+par_12,par3,dimmer,0
+par_12,par4,dimmer,0
+par_34,par1,dimmer,0
+par_34,par2,dimmer,0
+par_34,par3,dimmer,255
+par_34,par4,dimmer,255
+disco_red,disco*,colors,red
+disco_red,disco*,dimmer,255
+disco_on,disco*,dimmer,255
+disco_mid,disco*,dimmer,127
+disco_off,disco*,dimmer,0
+disco_green,disco*,colors,green
+disco_green,disco*,dimmer,127
+disco_blue,disco*,colors,blue
+disco_blue,disco*,dimmer,63

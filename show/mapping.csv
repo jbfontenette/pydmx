@@ -1,0 +1,41 @@
+# Bind APC mini mk2 controls to scenes.
+#
+# pad     raw note number, or friendlier notation:
+#           r0c0  grid row 0 col 0 -- ROW 0 IS THE BOTTOM ROW (note 0)
+#           t1    track button 1
+#           s1    scene launch button 1 (s1 is the TOP one)
+#
+# type    scene   activate a look
+#         clear   drop everything (panic button)
+#         reload  re-read scenes.csv and mapping.csv without restarting.
+#                 Flashes GREEN on success, RED for two seconds on failure.
+#                 Reload is atomic, so a broken CSV keeps the running show
+#                 AND keeps this button working. The one thing to avoid is
+#                 deleting this row -- a SUCCESSFUL reload without it leaves
+#                 you with no button. You get a warning if that happens.
+# mode    toggle  press on, press off. Stacks with other active scenes.
+#         flash   active only while held. Good for strobes and bumps.
+#         solo    becomes the only active scene.
+# colour  A name, or a raw palette index 0-127. Names available:
+#           red  amber  yellow_warm  yellow  green  turquoise  cyan  blue
+#           lavender  mauve  magenta  pink  warm_white  white  cold_white  uv
+#         Spaces, hyphens and capitals are all fine ("Warm White" works).
+#         See them on the grid with: python3 apc_leds.py names
+#
+#         A pad sits at 10% when idle and 100% when active -- same colour,
+#         ten times the light. If that is still not obvious enough, run
+#         controller.py --feedback pulse (or blink).
+pad,type,target,mode,colour
+r0c0,scene,disco_red,toggle,red
+r0c1,scene,disco_green,toggle,green
+r0c2,scene,disco_blue,toggle,blue
+r0c3,scene,disco_on,toggle,white
+r1c0,scene,disco_mid,solo,amber
+r1c1,scene,disco_off,solo,cold_white
+# Held, not latched -- release and it drops out.
+r7c7,scene,disco_red,flash,magenta
+# Panic button: drop everything.
+t1,clear,,toggle,red
+
+# Re-read the CSVs live. Keep this row.
+s1,reload,,toggle,cyan
