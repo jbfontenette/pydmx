@@ -779,7 +779,19 @@ class Show:
                 return candidate
         return None
 
-    def _current_stamps(self):
+    def stamps(self):
+        """Current mtimes of every watched file. Safe to call off-thread.
+
+        This is the ONE method on Show another thread may call: it stats
+        files and reads two attributes that are only ever rebound whole
+        (never mutated in place), so it cannot observe a half-built show.
+        Everything else here must be called from the thread that owns the
+        show -- see the threading doctrine in CLAUDE.md.
+
+        A caller that keeps its own copy can therefore detect a change
+        without waiting for the owning thread to accept it, which is what
+        the --watch detector in controller.py does.
+        """
         import os
         stamps = {}
         watched = dict(self.paths)
@@ -793,7 +805,13 @@ class Show:
         return stamps
 
     def changed_on_disk(self):
-        return self._current_stamps() != self._stamps
+        """True if the files differ from the last SUCCESSFUL load or reload.
+
+        Note the asymmetry: a failed reload does not advance the baseline, so
+        this keeps reporting True until the files parse. A caller that wants
+        one report per save should compare successive stamps() itself.
+        """
+        return self.stamps() != self._stamps
 
     def binding_for(self, note, shift):
         """Binding for a control, falling back to the base layer.
@@ -840,7 +858,7 @@ class Show:
         """Initial load. Raises on error."""
         (self.profiles, self.patch, self.scenes, self.chasers,
          self.bindings, self.faders, self.warnings) = self._parse()
-        self._stamps = self._current_stamps()
+        self._stamps = self.stamps()
         return self.warnings
 
     def reload(self):
@@ -864,7 +882,7 @@ class Show:
         (self.profiles, self.patch, self.scenes, self.chasers,
          self.bindings, self.faders, self.warnings) = (
             profiles, patch, scenes, chasers, bindings, faders, warnings)
-        self._stamps = self._current_stamps()
+        self._stamps = self.stamps()
 
         bits = []
         if added:

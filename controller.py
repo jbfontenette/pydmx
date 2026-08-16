@@ -24,21 +24,33 @@ VirtualDJ whenever VirtualDJ is actually delivering beats.
 Three threads, each with exactly one job:
 
     DMX thread    pushes a frame every 33ms, forever. Never blocks on input.
-    main loop     polls MIDI, updates the engine, refreshes LEDs.
-    watcher       optional, reloads the CSVs when they change on disk.
+    main loop     polls MIDI, updates the engine, refreshes LEDs, reloads.
+    watcher       optional, NOTICES that the CSVs changed on disk. It does
+                  not reload them -- it raises a flag and the main loop does.
 
 Input events never write to the port directly -- they mutate engine state,
 and the DMX thread transmits whatever it finds. That separation is what keeps
 the output steady when the Mac is busy.
+
+The same rule governs the watcher, for the same reason one level up: show and
+engine objects are mutated by exactly one thread. A reload swaps the very
+dicts the main loop is iterating (bindings in build_leds, active in
+engine.output, running in tick), so doing it from the watcher thread could
+kill the main loop with 'dict changed size during iteration' and leave the
+rig frozen on its last look with no input. Detect off-thread, mutate on the
+main loop.
 """
 
 import sys
 import threading
 import time
 
-import dmx
 import engine as engine_mod
 import showfile
+
+# dmx is imported inside main(): it needs pyserial, and everything above
+# main() -- input routing, reload reconciliation -- is stdlib-only logic the
+# tests exercise without any hardware packages installed.
 
 SHOW_DIR = "show"
 
@@ -246,6 +258,30 @@ def handle(event, show, eng, log, state, actions):
         f"  [{describe_active(eng)}]")
 
 
+def watch_files(show, stop, request, interval=0.5):
+    """The --watch thread. Detects changes; never acts on them.
+
+    Deliberately takes only what it is allowed to touch: mtimes off the show
+    and two events. It cannot reach the engine or the parsed show even by
+    accident, which is the point -- reloading from here swaps the dicts the
+    main loop is iterating and can kill it mid-frame. The main loop picks the
+    request up and does the reload itself.
+
+    Keeps its own copy of the stamps rather than calling
+    show.changed_on_disk(), which compares against the last SUCCESSFUL
+    reload: while a typo sits on disk that stays true, and we would ask the
+    main loop to re-parse a broken show twice a second. Comparing successive
+    stamps reports each save exactly once -- including the save that fixes
+    the typo.
+    """
+    seen = show.stamps()
+    while not stop.wait(interval):
+        stamps = show.stamps()
+        if stamps != seen:
+            seen = stamps
+            request.set()
+
+
 def apply_reload(show, eng):
     """Reload the CSVs and reconcile engine state. Returns (ok, message).
 
@@ -368,6 +404,10 @@ def main():
         print("\nCSVs parsed. No hardware touched.")
         return
 
+    # After the --check return, so validating the CSVs needs nothing but the
+    # standard library -- the same reason it touches no hardware.
+    import dmx
+
     if no_dmx:
         sender = dmx.NullSender()
         print("DMX: dry run, no adapter used")
@@ -443,14 +483,7 @@ def main():
         threading.Thread(target=sender.run_until, args=(stop,),
                          daemon=True).start()
 
-        def watcher():
-            while not stop.wait(0.5):
-                if show.changed_on_disk():
-                    ok, message = apply_reload(show, eng)
-                    if ok:
-                        print(f"\n  reloaded: {message}")
-                    else:
-                        print(f"\n  RELOAD FAILED, keeping show:\n    {message}")
+        reload_requested = threading.Event()
 
         if surface:
             build_leds(surface, show, eng, style, False)
@@ -490,23 +523,38 @@ def main():
                 surface.button(note, 1 if ok else 2)
             state["flash_until"] = time.monotonic() + (0.7 if ok else 2.5)
 
-        def reload_action(note):
+        def do_reload(note=None):
+            """The one place a reload happens, and it is on the main loop.
+
+            note is the pad that asked, or None when the watcher did. Both
+            triggers land here so the two paths cannot drift: the watcher
+            used to have its own copy that skipped the warnings and the LED
+            cache drop, which meant a watched edit could leave pads lit for
+            bindings that no longer existed.
+            """
             ok, message = apply_reload(show, eng)
             print(f"  {'reloaded' if ok else 'RELOAD FAILED'}: {message}")
             if not ok:
+                # No warnings on this branch: a failed parse leaves
+                # show.warnings describing the show that is still running,
+                # and printing them under an error reads as if the error
+                # produced them.
                 print("    (running show kept unchanged)")
-            for warning in show.warnings:
-                print(f"    warning: {warning}")
+            else:
+                for warning in show.warnings:
+                    print(f"    warning: {warning}")
             if ok and surface:
                 # Bindings may have changed wholesale, and the LED cache
                 # describes the old layout. Drop it so the next paint
                 # re-sends every pad rather than diffing against stale state.
                 surface.refresh()
-            flash_pad(note, "green" if ok else "red")
+            if note is not None:
+                flash_pad(note, "green" if ok else "red")
 
-        actions = {"reload": reload_action}
+        actions = {"reload": do_reload}
         if watching:
-            threading.Thread(target=watcher, daemon=True).start()
+            threading.Thread(target=watch_files, daemon=True,
+                             args=(show, stop, reload_requested)).start()
             print("Watching show/ for changes.")
 
         try:
@@ -515,6 +563,16 @@ def main():
                     for event in surface.poll():
                         handle(event, show, eng,
                                lambda m: print(f"  {m}"), state, actions)
+
+                # The watcher only raises the flag; the reload itself belongs
+                # here, between input and output, where nothing is mid-
+                # iteration. Clear before reloading: a save that lands during
+                # the parse then sets it again and gets its own reload rather
+                # than being swallowed.
+                if reload_requested.is_set():
+                    reload_requested.clear()
+                    print("\n  [show files changed]")
+                    do_reload()
 
                 now = time.monotonic()
                 if state["flash_until"] and now > state["flash_until"]:

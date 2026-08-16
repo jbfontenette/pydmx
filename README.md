@@ -257,9 +257,10 @@ in the show files.
 Controller flags: `--check`, `--sim`, `--no-dmx`, `--no-midi`, `--monitor`,
 `--os2l [port]`, `--watch`, `--beats`, `--feedback <style>`.
 
-> `--watch` (auto-reload on file change) currently reloads from a background
-> thread and can race the main loop. Use the `reload` pad at gigs; see
-> `REVIEW.md` item 1.
+`--watch` auto-reloads when the show files change. The watcher thread only
+notices the change; the main loop does the reload, on the same code path as
+the `reload` pad. Each save is reported once — if the files do not parse, the
+running show is kept and the next save is what tries again.
 
 ## Tests
 
@@ -267,9 +268,10 @@ Controller flags: `--check`, `--sim`, `--no-dmx`, `--no-midi`, `--monitor`,
 python3 -m unittest discover -s tests -t tests
 ```
 
-94 tests, no hardware and no third-party packages required. They cover the
-merge policy, patch arithmetic, chaser phase-locking, OS2L framing and the
-tempo maths — the decisions that are easy to "simplify" into bugs.
+109 tests, no hardware and no third-party packages required. They cover the
+merge policy, patch arithmetic, chaser phase-locking, OS2L framing, reload
+reconciliation and the tempo maths — the decisions that are easy to
+"simplify" into bugs.
 
 ## Layout
 

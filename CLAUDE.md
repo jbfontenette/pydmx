@@ -13,7 +13,7 @@ Read `README.md` for the CSV formats and `REVIEW.md` for known bugs.
 ## Before you start
 
 ```bash
-python3 -m unittest discover -s tests -t tests      # 94 tests, ~0.2s
+python3 -m unittest discover -s tests -t tests      # 109 tests, ~0.3s
 python3 controller.py --check                        # validate CSVs
 ```
 
@@ -47,9 +47,12 @@ handler — that is what causes flicker under CPU load.
 **3. The engine has no locks, by design.**
 All engine mutation happens on the main loop. Input sources (MIDI, OS2L,
 internal clock) queue their events and the main loop drains them with
-`poll()`. Do not add locks; keep the mutation on one thread. The one existing
-violation is the `--watch` reload thread — see `REVIEW.md` item 1, and fix it
-by moving the reload onto the main loop rather than by locking.
+`poll()`. Do not add locks; keep the mutation on one thread. Reload obeys the
+same rule: `--watch` runs `controller.watch_files()`, which only compares
+mtimes and sets an event, and the main loop performs the reload. Its only
+contact with the show is `Show.stamps()` — the one method safe to call from
+another thread. If a reload ever needs to get faster, parse on a worker and
+hand the finished objects to the main loop for the swap; do not lock.
 
 **4. Beat-synced chaser position is derived, never counted.**
 `chaser.step_at(pos)` maps the track's beat number to a step. A counter

@@ -11,12 +11,17 @@ architecture doctrine ("input events mutate state, one thread transmits")
 was applied rigorously to the DMX path and not at all to the reload path.
 Items 1, 2 and 6 are all instances of this.
 
+**Update: items 1, 2 and 6 are FIXED.** Reload now runs only on the main
+loop; the watcher thread detects and nothing else. What is left of this
+theme is item 4, which is about *what* a reload reconciles rather than
+*where* it runs.
+
 ---
 
 ## A. Bugs that can bite mid-set
 
-### 1. The `--watch` thread races the main loop  (crash risk: real)
-`watcher()` runs `apply_reload(show, eng)` on its own thread every 0.5s
+### 1. The `--watch` thread races the main loop  (FIXED)
+`watcher()` ran `apply_reload(show, eng)` on its own thread every 0.5s
 while the main loop is iterating the same structures. Concretely:
 
 - `build_leds` iterates `show.layer(shift)` while reload replaces
@@ -26,19 +31,37 @@ while the main loop is iterating the same structures. Concretely:
 - `engine.output()` iterates `eng.active` while reload filters it.
 - `eng.running` values are re-pointed mid-`tick()`.
 
-The reload *pad* is safe (it runs on the main loop); only `--watch` is
-dangerous. Cheapest fix: the watcher thread only *detects* the change and
-sets a flag; the main loop performs the reload. That matches the doctrine
-already used everywhere else. Until then, treat `--watch` as a
-development-only flag and use the reload pad at gigs.
+The reload *pad* was safe (it runs on the main loop); only `--watch` was
+dangerous.
 
-### 2. `flash_pad` writes to the surface from the watcher path
-Related: `reload_action` → `flash_pad` → `surface.pad()` can run on the
-watcher thread while the main loop is also mid-`build_leds`. mido output
+**Fix as applied:** `controller.watch_files()` compares successive
+`Show.stamps()` and sets a `threading.Event`; the main loop drains that flag
+between input and output and calls `do_reload()` — now the single call site
+of `apply_reload`, shared with the reload pad. The watcher is passed only the
+show, the stop event and the request event, so it cannot reach the engine
+even by accident. `Show.stamps()` is documented as the one method safe to
+call off-thread.
+
+The watcher keeps its own copy of the stamps rather than calling
+`changed_on_disk()`, which compares against the last *successful* reload:
+a file that will not parse would otherwise re-request a doomed parse on the
+main loop twice a second. Each save is now reported once, and the save that
+fixes the typo is reported like any other.
+
+Two silent defects in the old watcher path went with it: it never called
+`surface.refresh()` (so the LED diff cache still described the old layout
+after a watched edit) and never printed `show.warnings`. Sharing the pad's
+code path fixed both.
+
+### 2. `flash_pad` writes to the surface from the watcher path  (FIXED)
+Related: `reload_action` → `flash_pad` → `surface.pad()` could run on the
+watcher thread while the main loop was also mid-`build_leds`. mido output
 ports are not documented thread-safe, and the LED diff cache (`_led`) is a
 plain dict written from two threads. Worst case is a corrupt cache leaving
-pads stuck — the exact symptom the cache was built to fix. Same fix as #1:
-funnel reload through the main loop and this disappears.
+pads stuck — the exact symptom the cache was built to fix. Dissolved by the
+#1 fix: with reload on the main loop there is only ever one thread painting.
+`flash_pad` is now reached only from `do_reload(note=...)`, and a
+watcher-triggered reload passes no note, so it flashes nothing.
 
 ### 3. Chaser LTP order is lost on restart of a running chaser
 `engine.start_chaser` on an already-running chaser replaces its state
@@ -70,12 +93,14 @@ blocks the caller for a frame time for no reason. Harmless today; a trap
 for the next tool that calls `sender.send()` in a loop expecting it to be
 cheap. A `pass` with a comment would do.
 
-### 6. `Show.reload()` mutates in place; readers see mixed generations
+### 6. `Show.reload()` mutates in place; readers see mixed generations  (MOOT)
 `reload()` is atomic with respect to *parse failure* (good) but not with
-respect to *readers*: it assigns `self.profiles`, then `self.patch`, then
-`self.scenes`… as separate statements. A reader on another thread can see
-new patch with old scenes. With #1 fixed (single-threaded reload) this is
-moot; noted so nobody "fixes" #1 by adding locks around each field instead.
+respect to *readers*: it rebinds `self.profiles`, `self.patch`,
+`self.scenes`… in one tuple assignment, which is still several stores. A
+reader on another thread could see new patch with old scenes. With #1 fixed
+there is no such reader — the only thread that touches parsed show objects is
+the main loop — so no code change was made here. Noted so nobody "fixes" #1
+by adding locks around each field instead.
 
 ---
 
@@ -188,8 +213,8 @@ becomes annoying.
 
 ## What I would do first
 
-1. Move reload execution onto the main loop (fixes 1, 2, 6 in one change;
-   the watcher thread becomes a change-*detector* only).
+1. ~~Move reload execution onto the main loop (fixes 1, 2, 6 in one change;
+   the watcher thread becomes a change-*detector* only).~~ **Done.**
 2. Reconcile `eng.levels`/`eng.scales` in `apply_reload` (fixes 4, 10).
 3. Wrap `os2l._dispatch` in a protective try/except (fixes 11).
 4. Add the engine thread-contract docstring (13) while the reasoning is
