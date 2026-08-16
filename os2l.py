@@ -24,6 +24,11 @@ THREADING
     events are polled. That keeps every mutation of engine state on one
     thread and removes the need for locks around it.
 
+    Nothing a peer sends may kill that thread. _dispatch counts and reports
+    what it cannot decode rather than raising: an exception would unwind the
+    accept loop and the beats would just stop, with no error and no way back
+    without a restart.
+
 CONNECTION
     We are the server; VirtualDJ connects to us. It will not connect until a
     DMX pad is pressed in VirtualDJ at least once per session -- DNS-SD
@@ -122,6 +127,8 @@ class BeatClock:
         self.bpm = 0.0
         self.last_beat_at = 0.0
         self.total_beats = 0
+        self.bad_messages = 0
+        self._last_bad = None
 
     # --- lifecycle --------------------------------------------------------
     def start(self):
@@ -229,22 +236,55 @@ class BeatClock:
                 pass
 
     def _dispatch(self, msg):
+        """Handle one decoded message. Never raises.
+
+        A malformed message must cost that message and nothing else. This
+        runs on the listener thread, and an uncaught exception here would
+        unwind _serve and _run and kill the thread: beats would simply stop,
+        `connected` would stay True because nothing got to reset it, and no
+        VirtualDJ restart could reconnect because the accept loop is gone.
+        Silent death, mid-set. Every value in a beat message comes from
+        another program's next release, so treat the whole decode as
+        untrusted rather than guessing which field will change.
+        """
+        try:
+            self._decode(msg)
+        except Exception as exc:
+            self._dropped(msg, exc)
+
+    def _decode(self, msg):
+        """Turn one message into a beat. Raises on anything unexpected."""
         if msg.get("evt") != "beat":
             self._others.append(msg)
             return
-        try:
-            pos = int(msg["pos"])
-        except (KeyError, TypeError, ValueError):
-            return
+        pos = int(msg["pos"])
         bpm = float(msg.get("bpm") or 0) or self.bpm or FALLBACK_BPM
         strength = msg.get("strength")
         beat = Beat(pos=pos, bpm=bpm,
                     strength=None if strength is None else float(strength),
                     change=bool(msg.get("change")), at=time.monotonic())
+        # Clock state is only touched once the whole beat has been built, so
+        # a message that fails halfway leaves the tempo where it was.
         self.bpm = bpm
         self.last_beat_at = beat.at
         self.total_beats += 1
         self._beats.append(beat)
+
+    def _dropped(self, msg, exc):
+        """Count a bad message, and report each distinct fault once.
+
+        VirtualDJ sends two of these a second; if one is malformed the rest
+        usually are too, and a line per beat would bury everything else in
+        the terminal. A new kind of fault reports again, so a second problem
+        is not hidden by the first.
+        """
+        self.bad_messages += 1
+        reason = f"{type(exc).__name__}: {exc}"
+        if reason == self._last_bad:
+            return
+        self._last_bad = reason
+        self.on_status(f"ignoring a message it cannot read -- {reason} "
+                       f"in {repr(msg)[:60]} ({self.bad_messages} dropped)")
 
     def _advertise(self):
         try:

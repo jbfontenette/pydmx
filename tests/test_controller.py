@@ -326,6 +326,29 @@ class TestWatchDetector(unittest.TestCase):
         self.edit()
         self.assertTrue(self.request.wait(1.0))
 
+    def test_a_burst_of_writes_asks_once(self):
+        # One save is rarely one mtime bump -- an editor writes and then sets
+        # the times, and saving the whole show/ directory bumps five files.
+        # The main loop should be asked once, when the dust settles.
+        self.start()
+        for _ in range(4):
+            self.edit()
+            time.sleep(0.005)
+        self.assertTrue(self.request.wait(1.0))
+        self.request.clear()
+        self.assertFalse(self.request.wait(0.2))
+
+    def test_a_save_before_the_thread_starts_is_not_missed(self):
+        # Startup is not instant -- the Introduction message alone can wait
+        # 1.5s -- so a save can land before the watcher exists. Taking the
+        # baseline from "now" would swallow it until the NEXT save, and
+        # "I saved and nothing happened" is the confusion --watch exists to
+        # avoid. (This is also what made the failure-retry test flaky: the
+        # edit sometimes beat the thread to its first look.)
+        self.edit()
+        self.start()
+        self.assertTrue(self.request.wait(1.0))
+
     def test_one_request_per_save_even_when_the_reload_fails(self):
         # The regression this guards: if the detector asked
         # changed_on_disk(), an unparseable file would re-request every

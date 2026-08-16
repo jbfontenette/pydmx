@@ -152,12 +152,26 @@ but the guard is one line and stops the bug arriving through a future
 caller. A genuine no-op — same channels, same value — is still suppressed,
 which is what keeps a 127-message sweep cheap.
 
-### 11. `os2l._dispatch` trusts `pos` fits in an int forever
-Fine — but `strength` is parsed with `float(strength)` inside a try-less
-path; a malformed `"strength": "loud"` from a future VDJ build would kill
-the listener thread with ValueError, and the thread death is silent (accept
-loop is gone, `connected` stays True). Wrap `_dispatch` in a try/except
-that logs and drops the message; a bad message should never kill the clock.
+### 11. `os2l._dispatch` trusts `pos` fits in an int forever  (FIXED)
+`strength` was parsed with `float(strength)` inside a try-less path, so a
+malformed `"strength": "loud"` from a future VDJ build killed the listener
+thread with ValueError — silently, since the accept loop went with it and
+`connected` stayed True. `bpm` had the same exposure, and a bare JSON value
+(`_Stream` decodes any, not only objects) reached `msg.get` and raised
+AttributeError.
+
+**Fix as applied:** decoding moved to `_decode`, and `_dispatch` is now a
+guard around it that counts the message and reports it through `on_status`.
+Clock state is only touched once the whole beat is built, so a message that
+fails halfway leaves the tempo where it was. Each distinct fault is reported
+once — VirtualDJ sends two messages a second, and if one is malformed the
+rest usually are — but a *different* fault reports again, so a second
+problem is not hidden by the first. `bad_messages` counts them all.
+
+Verified over a real socket: with a good/bad/good sequence the bad ones are
+dropped with a reason, the good beats still arrive, the thread stays alive
+and the tempo holds. Before the change the same sequence killed the thread
+and the next write got a broken pipe.
 
 ### 12. `check_adapter` + `DmxSender` race
 `check_adapter` finds the port, then `DmxSender.__init__` globs again via
@@ -171,12 +185,16 @@ window.
 
 ## C. Design observations (sound, but worth writing down)
 
-### 13. The engine's thread-safety contract is implicit
+### 13. The engine's thread-safety contract is implicit  (FIXED)
 Engine has no locks *by design* — everything mutates on the main loop.
-That contract is stated in os2l.py's docstring but not in engine.py itself,
-which is where the next contributor will look. One paragraph at the top of
-engine.py ("no locks; all mutation on one thread; violated by --watch, see
-controller") would prevent the accidental "helpful" lock later.
+That contract was stated in os2l.py's docstring but not in engine.py itself,
+which is where the next contributor looks. engine.py now carries a THREADING
+section saying it plainly: every method is called from the main loop and only
+from the main loop, every other thread hands its work over instead (MIDI and
+the simulator queue events, OS2L queues beats, the watcher sets a flag, the
+DMX thread transmits what `output()` already returned), and the fix for a
+cross-thread call is to move the call, not to add a lock — which `output()`
+would have to take on every frame.
 
 ### 14. Reload is synchronous in the main loop
 Measured: ~50ms at 300 scenes, ~490ms at 2000. During that, beats queue
@@ -233,9 +251,9 @@ becomes annoying.
    the watcher thread becomes a change-*detector* only).~~ **Done.**
 2. ~~Reconcile `eng.levels`/`eng.scales` in `apply_reload` (fixes 4, 10).~~
    **Done.**
-3. Wrap `os2l._dispatch` in a protective try/except (fixes 11).
-4. Add the engine thread-contract docstring (13) while the reasoning is
-   fresh.
+3. ~~Wrap `os2l._dispatch` in a protective try/except (fixes 11).~~ **Done.**
+4. ~~Add the engine thread-contract docstring (13) while the reasoning is
+   fresh.~~ **Done.**
 
 Everything else is optional polish. The core architecture — one transmit
 thread, state mutation on the main loop, queues at every thread boundary,

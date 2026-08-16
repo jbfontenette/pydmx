@@ -81,6 +81,75 @@ class TestBeat(unittest.TestCase):
         self.assertTrue(unknown.audible)
 
 
+class TestOS2LBadMessages(unittest.TestCase):
+    """A bad message costs that message, never the listener thread.
+
+    _dispatch runs on the listener thread. An exception there unwinds the
+    accept loop and the beats stop with no error and no way back short of a
+    restart, so every one of these must be survivable.
+    """
+
+    def setUp(self):
+        self.status = []
+        self.clock = os2l.BeatClock(advertise=False,
+                                    on_status=self.status.append)
+        self.clock.bpm = 128.0
+
+    def feed(self, *messages):
+        for msg in messages:
+            self.clock._dispatch(msg)
+
+    def good(self, pos=1):
+        return {"evt": "beat", "pos": pos, "bpm": 128.0, "strength": 0.8}
+
+    def test_unparseable_strength_drops_one_beat(self):
+        # The concrete case from REVIEW item 11: a future VirtualDJ build
+        # sending a word where a number was.
+        self.feed(self.good(1), {"evt": "beat", "pos": 2, "strength": "loud"},
+                  self.good(3))
+        self.assertEqual([b.pos for b in self.clock.poll()], [1, 3])
+        self.assertEqual(self.clock.bad_messages, 1)
+
+    def test_unparseable_bpm_leaves_the_tempo_alone(self):
+        self.feed(self.good(1))
+        self.feed({"evt": "beat", "pos": 2, "bpm": "fast"})
+        self.assertEqual(self.clock.bpm, 128.0)
+        self.assertEqual(self.clock.total_beats, 1)
+
+    def test_missing_and_nonsense_fields_survive(self):
+        for msg in ({"evt": "beat"},                       # no pos
+                    {"evt": "beat", "pos": None},
+                    {"evt": "beat", "pos": "one"},
+                    {"evt": "beat", "pos": [1, 2]}):
+            self.feed(msg)
+        self.assertEqual(self.clock.poll(), [])
+        self.assertEqual(self.clock.bad_messages, 4)
+
+    def test_a_message_that_is_not_an_object_survives(self):
+        # _Stream decodes any JSON value, not only objects, so a bare number
+        # or list reaches _dispatch and would hit .get on a non-dict.
+        self.feed(42, [1, 2, 3], "beat", None)
+        self.assertEqual(self.clock.bad_messages, 4)
+        self.feed(self.good(9))
+        self.assertEqual([b.pos for b in self.clock.poll()], [9])
+
+    def test_each_distinct_fault_is_reported_once(self):
+        # Two per second, so a line per bad beat would bury the terminal.
+        for pos in range(5):
+            self.feed({"evt": "beat", "pos": pos, "strength": "loud"})
+        self.assertEqual(len(self.status), 1)
+        self.assertEqual(self.clock.bad_messages, 5)
+
+        # ...but a different fault is not hidden by the first.
+        self.feed({"evt": "beat", "pos": "one"})
+        self.assertEqual(len(self.status), 2)
+
+    def test_non_beat_messages_still_pass_through(self):
+        self.feed({"evt": "btn", "name": "pad1", "state": True})
+        self.assertEqual(len(self.clock.poll_messages()), 1)
+        self.assertEqual(self.clock.bad_messages, 0)
+
+
 class TestTapTempo(unittest.TestCase):
     def test_two_taps_give_a_tempo(self):
         tapper = tempo.TapTempo()

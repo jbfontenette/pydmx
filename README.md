@@ -259,8 +259,10 @@ Controller flags: `--check`, `--sim`, `--no-dmx`, `--no-midi`, `--monitor`,
 
 `--watch` auto-reloads when the show files change. The watcher thread only
 notices the change; the main loop does the reload, on the same code path as
-the `reload` pad. Each save is reported once — if the files do not parse, the
-running show is kept and the next save is what tries again.
+the `reload` pad. It waits for the files to stop changing before asking, so
+saving all five CSVs at once is one reload rather than five, and a file caught
+mid-write is not read as a typo. Each save is reported once — if the files do
+not parse, the running show is kept and the next save is what tries again.
 
 ## Tests
 
@@ -268,7 +270,7 @@ running show is kept and the next save is what tries again.
 python3 -m unittest discover -s tests -t tests
 ```
 
-119 tests, no hardware and no third-party packages required. They cover the
+127 tests, no hardware and no third-party packages required. They cover the
 merge policy, patch arithmetic, chaser phase-locking, OS2L framing, reload
 reconciliation and the tempo maths — the decisions that are easy to
 "simplify" into bugs.

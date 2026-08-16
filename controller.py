@@ -271,14 +271,29 @@ def watch_files(show, stop, request, interval=0.5):
     show.changed_on_disk(), which compares against the last SUCCESSFUL
     reload: while a typo sits on disk that stays true, and we would ask the
     main loop to re-parse a broken show twice a second. Comparing successive
-    stamps reports each save exactly once -- including the save that fixes
-    the typo.
+    stamps reports each edit once -- including the one that fixes the typo.
+
+    It asks only once the files have STOPPED moving, which is not the same as
+    asking on every change. One save is rarely one mtime bump: an editor
+    writes and then sets the times, saving five CSVs at once bumps five, and
+    a file caught halfway through being written parses as a typo that is not
+    there. Waiting for a quiet interval collapses all of that into the single
+    reload the user meant, at the cost of one extra interval of latency.
     """
     seen = show.stamps()
+    # A save that landed between the load and this thread being scheduled
+    # counts as a change: startup is not instant -- the Introduction message
+    # alone can wait 1.5s -- and the main loop is already running a show the
+    # files no longer describe.
+    settling = show.changed_on_disk(seen)
+
     while not stop.wait(interval):
         stamps = show.stamps()
         if stamps != seen:
             seen = stamps
+            settling = True
+        elif settling:
+            settling = False
             request.set()
 
 

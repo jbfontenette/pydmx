@@ -32,6 +32,23 @@ only notice mid-set. Deriving from pos means those cases need no handling.
 
 A step with duration_ms = 0 holds until something else fires, which is what
 makes a fully manual chaser just an ordinary chaser with no timers.
+
+THREADING
+
+There are no locks in this module, and that is a design decision rather than
+an omission. Everything here -- activate, tick, on_beat, the faders, output --
+is called from the main loop and only from the main loop. Every other thread
+in the program hands its work over instead of reaching in: MIDI and the
+simulator queue events for poll(), the OS2L listener queues beats, the file
+watcher sets a flag and the main loop performs the reload, and the DMX thread
+transmits the frame output() already returned. Nothing outside calls into an
+Engine.
+
+So if something needs to touch engine state from another thread, move the
+call, do not add a lock. A lock here would have to be taken by output() on
+every frame -- the one path that must never stall -- to buy safety for a
+caller that should not exist. See the threading notes at the top of
+controller.py and os2l.py for the other half of the arrangement.
 """
 
 import time

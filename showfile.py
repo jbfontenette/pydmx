@@ -804,14 +804,19 @@ class Show:
                 stamps[key] = None
         return stamps
 
-    def changed_on_disk(self):
+    def changed_on_disk(self, stamps=None):
         """True if the files differ from the last SUCCESSFUL load or reload.
+
+        Pass a stamps() snapshot to ask the question about that snapshot
+        instead of taking a fresh one. The watcher does exactly that, so its
+        own baseline and this question come from a single look at the files:
+        with two looks, a save landing between them is reported twice.
 
         Note the asymmetry: a failed reload does not advance the baseline, so
         this keeps reporting True until the files parse. A caller that wants
         one report per save should compare successive stamps() itself.
         """
-        return self.stamps() != self._stamps
+        return (self.stamps() if stamps is None else stamps) != self._stamps
 
     def binding_for(self, note, shift):
         """Binding for a control, falling back to the base layer.
