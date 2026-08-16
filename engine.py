@@ -236,12 +236,18 @@ class Engine:
         source, so it needs no place in the LTP ordering and cannot fight
         with scenes for a snap channel (level faders are refused on those
         at load time).
+
+        A sweep is ~127 messages, so a no-op is worth suppressing -- but the
+        comparison covers the CHANNELS as well as the value. Comparing the
+        value alone would strand a fader whose channels changed under it
+        (a re-patch and reload) at the same physical position: the update it
+        needs to reach the new channels looks like the no-op it is not.
         """
         value = max(0, min(255, int(value)))
-        current = self.levels.get(fader)
-        if current and current[1] == value:
+        entry = (tuple(channels), value)
+        if self.levels.get(fader) == entry:
             return
-        self.levels[fader] = (tuple(channels), value)
+        self.levels[fader] = entry
         self.dirty = True
 
     def set_scale(self, fader, channels, value):
@@ -252,12 +258,14 @@ class Engine:
         versus 'take the pars down without touching the scene'. Stacked
         scale faders multiply, which is what makes them behave like the
         global master, just narrower.
+
+        Diffed on (channels, value) for the same reason as set_level.
         """
         value = max(0, min(255, int(value)))
-        current = self.scales.get(fader)
-        if current and current[1] == value:
+        entry = (tuple(channels), value)
+        if self.scales.get(fader) == entry:
             return
-        self.scales[fader] = (tuple(channels), value)
+        self.scales[fader] = entry
         self.dirty = True
 
     def set_master(self, value):

@@ -128,6 +128,32 @@ class TestFaders(unittest.TestCase):
         self.assertEqual(out[1], 0)
         self.assertEqual(out[bar], 15)                  # untouched
 
+    def test_same_value_on_new_channels_still_updates(self):
+        # The no-op guard compares (channels, value), not the value alone.
+        # A re-patch moves the channels under a fader that has not moved;
+        # comparing only the value would leave the new channels dark forever
+        # unless the fader happened to be swept to a different position.
+        self.eng.set_level(1, self.channels, 200)
+        self.eng.set_level(1, (5,), 200)
+        out = self.eng.output()
+        self.assertEqual(out[5], 200)
+        self.assertNotIn(1, out)
+
+    def test_same_value_same_channels_is_still_suppressed(self):
+        # A sweep is ~127 messages; the guard exists to stay cheap.
+        self.eng.set_level(1, self.channels, 200)
+        self.eng.output()                               # clears dirty
+        self.eng.set_level(1, self.channels, 200)
+        self.assertFalse(self.eng.dirty)
+
+    def test_scale_diffs_on_channels_too(self):
+        self.eng.activate("warm")
+        self.eng.set_scale(2, self.channels, 128)
+        self.eng.set_scale(2, (11,), 128)
+        out = self.eng.output()
+        self.assertEqual(out[1], 255)                   # no longer scaled
+        self.assertEqual(out[11], 128)
+
     def test_clear_does_not_reset_faders(self):
         # Fader state mirrors a physical position. Zeroing it would leave
         # the software disagreeing with the hardware until you touched it.

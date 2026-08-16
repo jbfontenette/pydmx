@@ -287,7 +287,9 @@ def apply_reload(show, eng):
 
     Atomic: if any file fails to parse the running show is untouched, so a
     typo mid-set costs you nothing. Active scenes survive if they still
-    exist; ones that vanished are dropped.
+    exist; ones that vanished are dropped. Running chasers and live fader
+    positions are re-resolved against the new show, so nothing keeps driving
+    what the files used to say.
     """
     ok, message, _ = show.reload()
     if not ok:
@@ -315,9 +317,44 @@ def apply_reload(show, eng):
         if st.chaser.steps:
             st.index %= len(st.chaser.steps)
 
+    # Fader state has exactly the same problem as the stale chaser above:
+    # eng.levels/eng.scales hold the channel tuple captured at the last move,
+    # resolved against the OLD patch. Re-patch a fixture and reload, and an
+    # untouched fader would keep driving the old address -- which reads as
+    # the re-patch having silently failed.
+    #
+    # The stored value IS the fader's physical position (both kinds arrive
+    # through the same conversion in apply_fader), so it carries across a
+    # change of binding: a fader re-typed from level to scale keeps the
+    # position it is physically sitting at, and only its job changes.
+    positions = {number: value for number, (_, value)
+                 in list(eng.levels.items()) + list(eng.scales.items())}
+    levels, scales = {}, {}
+    unbound = []
+    for number, value in sorted(positions.items()):
+        binding = show.faders.get(number)
+        kind = binding.kind if binding else None
+        if kind == "level":
+            levels[number] = (tuple(binding.channels), value)
+        elif kind == "scale":
+            scales[number] = (tuple(binding.channels), value)
+        else:
+            # Gone from mapping.csv, re-typed to master or bpm, or dropped by
+            # the loader because its glob now matches no fixture. Either way
+            # it drives nothing until it is bound and moved again.
+            unbound.append(number)
+    # master is deliberately NOT reconciled here. It is one scalar with no
+    # per-fader memory, so a fader newly typed 'master' has no unambiguous
+    # claim on it, and a master that moves on its own during a reload is the
+    # kind of surprise invariant 10 exists to prevent. It keeps its value.
+    eng.levels, eng.scales = levels, scales
+
     eng.dirty = True
     if dropped:
         message += f" (dropped active: {', '.join(dropped)})"
+    if unbound:
+        message += (" (faders dropped: "
+                    + ", ".join(f"f{number}" for number in unbound) + ")")
     return True, message
 
 

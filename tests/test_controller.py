@@ -135,6 +135,131 @@ class TestApplyReload(unittest.TestCase):
         self.assertEqual(self.eng.active, [])
 
 
+class TestFaderReconciliation(unittest.TestCase):
+    """Live fader state must follow the new patch, not the old one.
+
+    The test show binds f1 = level par*.dimmer and f2 = scale par*.dimmer,
+    both resolving to channels (1, 11) -- par1 and par2's dimmers.
+    """
+
+    MAPPING = ("pad,type,target,mode,colour,shift\n"
+               "r0c0,scene,warm,toggle,red,\n"
+               "f1,level,par*.dimmer\n"
+               "f2,scale,par*.dimmer\n")
+
+    def setUp(self):
+        self.dir = helper.temp_show()
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.show, self.eng = show_and_engine(self.dir)
+        self.assertEqual(self.show.faders[1].channels, (1, 11))
+
+    def move(self, number, value):
+        """Put a fader somewhere, through the path the hardware uses."""
+        state = {"master_pending": None, "bpm_pending": None, "internal": None}
+        controller.apply_fader(number, value, self.show, self.eng, state)
+
+    def repatch_par2(self, address=100):
+        rewrite(self.dir, "fixtures", "fixture,profile,address\n"
+                                      "par1,par,1\n"
+                                      f"par2,par,{address}\n"
+                                      "bar1,bar,21\n")
+
+    def test_level_follows_a_repatched_fixture(self):
+        # The item 4 bug: without reconciliation the fader keeps driving 11
+        # until someone physically moves it, which looks exactly like the
+        # re-patch having failed.
+        self.move(1, 100)                       # ~201 of 255
+        value = self.eng.levels[1][1]
+        self.repatch_par2()
+
+        ok, _ = controller.apply_reload(self.show, self.eng)
+
+        self.assertTrue(ok)
+        self.assertEqual(self.eng.levels[1], ((1, 100), value))
+        out = self.eng.output()
+        self.assertEqual(out[100], value)
+        self.assertNotIn(11, out)
+
+    def test_scale_follows_a_repatched_fixture(self):
+        self.eng.activate("warm")               # par dimmers at 255
+        self.move(2, 64)                        # about half
+        half = self.eng.scales[2][1]
+        self.repatch_par2()
+
+        controller.apply_reload(self.show, self.eng)
+
+        self.assertEqual(self.eng.scales[2][0], (1, 100))
+        out = self.eng.output()
+        # 255 scaled by half/255 is half, on both channels the fader claims.
+        self.assertEqual(out[1], half)
+        self.assertEqual(out[100], half)
+
+    def test_unbound_fader_is_dropped_and_reported(self):
+        self.move(1, 127)
+        rewrite(self.dir, "mapping", "pad,type,target,mode,colour,shift\n"
+                                     "r0c0,scene,warm,toggle,red,\n"
+                                     "f2,scale,par*.dimmer\n")
+
+        ok, message = controller.apply_reload(self.show, self.eng)
+
+        self.assertTrue(ok)
+        self.assertNotIn(1, self.eng.levels)
+        self.assertNotIn(1, self.eng.output())
+        self.assertIn("f1", message)
+
+    def test_fader_whose_glob_matches_nothing_is_dropped(self):
+        # The loader already warns "fader SKIPPED" and leaves it out of
+        # show.faders; the engine must not go on driving the old channels.
+        self.move(1, 127)
+        rewrite(self.dir, "mapping", self.MAPPING.replace("par*.dimmer",
+                                                          "gone*.dimmer"))
+
+        ok, message = controller.apply_reload(self.show, self.eng)
+
+        self.assertTrue(ok)
+        self.assertEqual(self.eng.levels, {})
+        self.assertIn("f1", message)
+
+    def test_retyped_fader_keeps_its_position(self):
+        # The stored value is where the fader physically sits, so it is still
+        # true after the binding changes job -- only what it drives changes.
+        self.eng.activate("warm")
+        self.move(1, 64)                        # level at ~128
+        value = self.eng.levels[1][1]
+        rewrite(self.dir, "mapping",
+                self.MAPPING.replace("f1,level,par*.dimmer",
+                                     "f1,scale,par*.dimmer"))
+
+        controller.apply_reload(self.show, self.eng)
+
+        self.assertNotIn(1, self.eng.levels)
+        self.assertEqual(self.eng.scales[1], ((1, 11), value))
+        # Scaling now, not adding: as a level fader it would have lost HTP
+        # against the scene's 255 and left the output at 255.
+        self.assertEqual(self.eng.output()[1], value)
+
+    def test_master_is_left_alone(self):
+        # One scalar, no per-fader memory: a reload must not move it.
+        self.eng.set_master(200)
+        self.move(1, 100)
+        self.repatch_par2()
+
+        controller.apply_reload(self.show, self.eng)
+
+        self.assertEqual(self.eng.master, 200)
+
+    def test_untouched_faders_are_not_invented(self):
+        # Reconciliation re-resolves what the engine already knows; it does
+        # not adopt positions for faders nobody has moved. The APC reports
+        # those at startup, not on reload.
+        self.repatch_par2()
+
+        controller.apply_reload(self.show, self.eng)
+
+        self.assertEqual(self.eng.levels, {})
+        self.assertEqual(self.eng.scales, {})
+
+
 class TestStamps(unittest.TestCase):
     """show.stamps() is the one thing the watcher thread may call."""
 

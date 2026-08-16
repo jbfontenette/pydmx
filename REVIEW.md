@@ -75,16 +75,29 @@ every chaser is defensible but surprising; nothing in mapping.csv warns
 that a solo scene pad kills chasers. Consider documenting or splitting
 "solo among scenes" from "solo everything".
 
-### 4. `apply_reload` does not reconcile fader channel bindings
-Reload swaps `show.faders` (new channel lists resolved against the new
-patch), but `eng.levels` and `eng.scales` still hold the **old** channel
+### 4. `apply_reload` does not reconcile fader channel bindings  (FIXED)
+Reload swapped `show.faders` (new channel lists resolved against the new
+patch), but `eng.levels` and `eng.scales` still held the **old** channel
 tuples captured at the last fader move. Re-patch a fixture and reload, and
-a level fader keeps driving the *old* address until the fader is physically
+a level fader kept driving the *old* address until the fader was physically
 moved. This is the same class of bug as the stale `st.chaser` reference
-that reload already fixes for chasers — faders need the identical
-treatment: re-resolve `eng.levels`/`eng.scales` through the new
-`show.faders` on successful reload, dropping entries whose fader is no
-longer bound.
+that reload already fixes for chasers.
+
+**Fix as applied:** `apply_reload` now rebuilds both dicts from
+`show.faders` after the chaser re-pointing, in the same style. The stored
+value is the fader's physical position (both kinds arrive through the same
+conversion in `apply_fader`), so it carries across a change of binding: a
+fader re-typed from `level` to `scale` keeps its position and only changes
+job. Entries whose fader is gone from `mapping.csv`, re-typed to
+`master`/`bpm`, or dropped by `_level_channels` because its glob no longer
+matches are dropped, and the reload message names them
+(`faders dropped: f1`) beside the existing `dropped active:`.
+
+Known edge, decided deliberately: `master` is **not** reconciled. It is one
+scalar with no per-fader memory, so a fader newly typed `master` has no
+unambiguous claim on it, and a master that moves on its own during a reload
+is the surprise item 10 of the invariants list exists to prevent. It keeps
+its value until a fader is moved.
 
 ### 5. `NullSender.send()` sleeps 22.6ms while holding nothing back
 `run_until` in NullSender never calls `send()` (correct), but
@@ -129,12 +142,15 @@ Correct behaviour, but it also resets after a *blocking reload*, so a
 tapped phase quietly shifts. One `on_status`-style callback or a returned
 flag ("re-anchored, phase lost") would let the controller print it.
 
-### 10. Fader 1-step diff suppression can strand the last position
-`set_level`/`set_scale` skip when the value is unchanged — but they compare
-only the value, not the channels. After a reload changes a fader's channel
-list (#4), a fader at the same physical value will *never* update the new
-channels because the value-equality check short-circuits. Fixing #4
-properly makes this moot; otherwise compare `(channels, value)`.
+### 10. Fader 1-step diff suppression can strand the last position  (FIXED)
+`set_level`/`set_scale` skipped when the value was unchanged — but they
+compared only the value, not the channels. After a reload changed a fader's
+channel list (#4), a fader at the same physical value would *never* update
+the new channels because the value-equality check short-circuited. Both now
+diff on `(channels, value)`. #4 means the engine no longer depends on this,
+but the guard is one line and stops the bug arriving through a future
+caller. A genuine no-op — same channels, same value — is still suppressed,
+which is what keeps a 127-message sweep cheap.
 
 ### 11. `os2l._dispatch` trusts `pos` fits in an int forever
 Fine — but `strength` is parsed with `float(strength)` inside a try-less
@@ -215,7 +231,8 @@ becomes annoying.
 
 1. ~~Move reload execution onto the main loop (fixes 1, 2, 6 in one change;
    the watcher thread becomes a change-*detector* only).~~ **Done.**
-2. Reconcile `eng.levels`/`eng.scales` in `apply_reload` (fixes 4, 10).
+2. ~~Reconcile `eng.levels`/`eng.scales` in `apply_reload` (fixes 4, 10).~~
+   **Done.**
 3. Wrap `os2l._dispatch` in a protective try/except (fixes 11).
 4. Add the engine thread-contract docstring (13) while the reasoning is
    fresh.
