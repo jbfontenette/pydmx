@@ -63,17 +63,39 @@ pads stuck — the exact symptom the cache was built to fix. Dissolved by the
 `flash_pad` is now reached only from `do_reload(note=...)`, and a
 watcher-triggered reload passes no note, so it flashes nothing.
 
-### 3. Chaser LTP order is lost on restart of a running chaser
-`engine.start_chaser` on an already-running chaser replaces its state
-(index resets — fine, matches scene re-press semantics) and `_add` moves it
-to the end of `active`. But `handle()` for a `chaser` binding in toggle
-mode calls `toggle_chaser`, which for a running chaser calls
-`stop_chaser`. So far so good. The subtle one: **`solo_chaser` and `solo`
-clear level/scale-unaffected `active` but also wipe `running` — including
-beat-synced chasers the user meant to keep**. `solo` on a *scene* stopping
-every chaser is defensible but surprising; nothing in mapping.csv warns
-that a solo scene pad kills chasers. Consider documenting or splitting
-"solo among scenes" from "solo everything".
+### 3. `solo` stops chasers, and nothing said so  (DOCUMENTED — still open)
+The original heading here was about chaser LTP order, which turned out to be
+fine: `start_chaser` on a running chaser resets its state and `_add` moves it
+to the end of `active`, and toggle mode stops rather than restarts it. The
+real finding is one line further down.
+
+**`solo` and `solo_chaser` both call `eng.clear()`, which wipes `running` as
+well as `active`** — so a solo *scene* pad silently stops every chaser,
+beat-synced ones included. Defensible (solo means "the only live source",
+literally) but easy to meet by accident mid-set, and nothing in
+`mapping.csv` or the README said it.
+
+**Decision: keep the behaviour, document it.** Changing the scoping would
+alter what existing solo pads do the next time they are played, which is a
+worse trade for a rig in use than one documented surprise. The note now
+appears in `README.md` under `mode` and in the `show/mapping.csv` header,
+and `TestSoloScope` in `tests/test_engine.py` pins it so the documentation
+cannot quietly stop being true.
+
+Recorded while confirming it, and now documented alongside: **`flash` never
+stops anything but its own target.** Its release does stop that target
+whoever started it, so flashing a chaser already running from another pad
+stops it on release (`TestFlashRelease`).
+
+**Left open deliberately.** If this is revisited, the two alternatives are:
+
+- *Solo within its own kind* — a scene solo clears scenes only, a chaser
+  solo clears chasers only, `clear` stays the way to drop everything. The
+  most intuitive reading; the cost is that existing solo pads change
+  behaviour under the user's fingers.
+- *A second mode* — `solo` keeps meaning everything, a new `solo_scenes`
+  gives the scoped version per pad. No change to existing shows, at the
+  price of new CSV vocabulary to parse, warn about, document and test.
 
 ### 4. `apply_reload` does not reconcile fader channel bindings  (FIXED)
 Reload swapped `show.faders` (new channel lists resolved against the new

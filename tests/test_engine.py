@@ -162,6 +162,58 @@ class TestFaders(unittest.TestCase):
         self.assertEqual(self.eng.output()[1], 200)
 
 
+class TestSoloScope(unittest.TestCase):
+    """How far a solo pad reaches. This is a DECISION, not an accident.
+
+    solo means "the only live source", literally: it drops every scene and
+    every chaser, beat-synced ones included, then starts its own target. That
+    surprises people -- a solo scene pad silently ends the chaser driving the
+    room -- and REVIEW item 3 keeps the alternatives on file. It is documented
+    in README.md and show/mapping.csv, so these tests exist to make sure the
+    documentation stays true. Changing the behaviour means changing those
+    words too.
+    """
+
+    def setUp(self):
+        self.show, self.eng = make_engine()
+
+    def test_solo_scene_stops_running_chasers(self):
+        self.eng.start_chaser("timed")
+        self.eng.activate("half")
+        self.eng.solo("warm")
+        self.assertEqual(self.eng.running, {})
+        self.assertEqual(self.eng.active, [("scene", "warm")])
+
+    def test_solo_chaser_stops_scenes_and_other_chasers(self):
+        self.eng.activate("warm")
+        self.eng.start_chaser("timed")
+        self.eng.solo_chaser("manual")
+        self.assertEqual(list(self.eng.running), ["manual"])
+        self.assertEqual(self.eng.active, [("chaser", "manual")])
+
+    def test_solo_leaves_fader_state_alone(self):
+        # Same reasoning as clear(): fader state mirrors a physical position,
+        # and zeroing it would leave the software disagreeing with the desk.
+        channels = self.show.faders[1].channels
+        self.eng.set_level(1, channels, 200)
+        self.eng.solo("half")
+        self.assertEqual(self.eng.output()[1], 200)
+
+    def test_flash_does_not_touch_chasers(self):
+        # The other half of the contract: flash reaches only its own target.
+        # activate/deactivate are exactly what a flash press and release call.
+        self.eng.start_chaser("timed", now=0.0)
+        self.eng.step_chaser("timed")
+        position = self.eng.chaser_position("timed")
+
+        self.eng.activate("half")
+        self.eng.deactivate("half")
+
+        self.assertIn("timed", self.eng.running)
+        self.assertEqual(self.eng.chaser_position("timed"), position)
+        self.assertEqual(self.eng.active, [("chaser", "timed")])
+
+
 class TestChaserClocking(unittest.TestCase):
     def setUp(self):
         self.show, self.eng = make_engine()

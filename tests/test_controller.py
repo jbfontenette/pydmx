@@ -382,6 +382,56 @@ class TestWatchDetector(unittest.TestCase):
         self.assertEqual(self.eng.active, [("scene", "warm")])
 
 
+class TestFlashRelease(unittest.TestCase):
+    """A flash pad reaches only its own target -- but it does reach it.
+
+    The release path stops the target whoever started it, so flashing a
+    chaser that is already running from another pad stops it on release. That
+    is the documented behaviour (README, show/mapping.csv); it is pinned here
+    because it is the surprising corner of an otherwise narrow mode.
+    """
+
+    MAPPING = ("pad,type,target,mode,colour,shift\n"
+               "r0c0,chaser,timed,toggle,cyan,\n"
+               "r0c1,chaser,timed,flash,white,\n"
+               "r0c2,scene,warm,flash,red,\n")
+
+    def setUp(self):
+        import virtualapc
+        self.previous = controller._SURFACE_MODULE
+        controller._SURFACE_MODULE = virtualapc
+        self.addCleanup(setattr, controller, "_SURFACE_MODULE", self.previous)
+        self.dir = helper.temp_show(mapping=self.MAPPING)
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.show, self.eng = show_and_engine(self.dir)
+        self.state = {"shift": False, "held": {}, "relayout": False,
+                      "master_pending": None, "bpm_pending": None,
+                      "flash_until": 0.0, "internal": None}
+
+    def press(self, note):
+        controller.handle(("press", note), self.show, self.eng,
+                          lambda m: None, self.state, {})
+
+    def release(self, note):
+        controller.handle(("release", note), self.show, self.eng,
+                          lambda m: None, self.state, {})
+
+    def test_flashing_a_scene_leaves_a_running_chaser_alone(self):
+        self.press(0)                       # toggle the chaser on
+        self.press(2)                       # flash a scene over it
+        self.release(2)
+        self.assertIn("timed", self.eng.running)
+
+    def test_flashing_a_running_chaser_stops_it_on_release(self):
+        self.press(0)                       # toggle on
+        self.assertIn("timed", self.eng.running)
+        self.press(1)                       # flash the SAME chaser
+        self.release(1)
+        # stop_chaser does not care who started it. Worth knowing before you
+        # bind the same chaser to both a toggle and a flash pad.
+        self.assertNotIn("timed", self.eng.running)
+
+
 class TestReloadPadRouting(unittest.TestCase):
     """The pad path still reaches the reload action, and says which pad.
 

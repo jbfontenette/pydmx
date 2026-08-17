@@ -137,7 +137,8 @@ red_all,*,colour,red
 > **A scene of zeros cannot turn anything off.** Under HTP it loses every
 > comparison, so it is indistinguishable from being inactive. Going dark means
 > *deactivating* sources — use a `clear` pad, or a `solo` pad if you want one
-> look left standing.
+> look left standing. A `solo` pad drops running chasers as well as scenes;
+> see the note under `mode` below.
 
 ### 4. `chasers.csv` — sequences
 
@@ -202,6 +203,17 @@ f2,scale,wash*.dimmer
 **`mode`** — `toggle` stacks, `solo` becomes the only live source, `flash` is
 active only while held. Leave blank on the types that ignore it; writing one
 there warns.
+
+> **`solo` stops chasers too.** "The only live source" is literal: a solo pad
+> drops *everything* running — every scene and every chaser, including a
+> beat-synced one — and then starts its own target. That is deliberate, but it
+> is easy to meet by accident when a solo scene pad silently ends the chaser
+> driving the room. Use `toggle` if you want the chaser to survive.
+>
+> `flash` is the opposite: it touches only its own target. It never stops
+> anything else. Note that the release stops that target whoever started it,
+> so flashing a chaser that is already running from another pad will stop it
+> when you let go.
 
 **`colour`** — a name (`red`, `amber`, `yellow_warm`, `yellow`, `green`,
 `turquoise`, `cyan`, `blue`, `lavender`, `mauve`, `magenta`, `pink`,
@@ -270,7 +282,7 @@ not parse, the running show is kept and the next save is what tries again.
 python3 -m unittest discover -s tests -t tests
 ```
 
-127 tests, no hardware and no third-party packages required. They cover the
+133 tests, no hardware and no third-party packages required. They cover the
 merge policy, patch arithmetic, chaser phase-locking, OS2L framing, reload
 reconciliation and the tempo maths — the decisions that are easy to
 "simplify" into bugs.
