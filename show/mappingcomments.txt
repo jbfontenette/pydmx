@@ -1,0 +1,35 @@
+# Bind APC mini mk2 controls to scenes.
+#
+# pad     raw note number, or friendlier notation:
+#           r0c0  grid row 0 col 0 -- ROW 0 IS THE BOTTOM ROW (note 0)
+#           t1    track button 1
+#           s1    scene launch button 1 (s1 is the TOP one)
+#
+# type    scene   activate a look
+#         clear   drop everything (panic button)
+#         reload  re-read scenes.csv and mapping.csv without restarting.
+#                 Flashes GREEN on success, RED for two seconds on failure.
+#                 Reload is atomic, so a broken CSV keeps the running show
+#                 AND keeps this button working. The one thing to avoid is
+#                 deleting this row -- a SUCCESSFUL reload without it leaves
+#                 you with no button. You get a warning if that happens.
+# mode    toggle  press on, press off. Stacks with other active scenes.
+#         flash   active only while held. Good for strobes and bumps.
+#                 Touches ONLY its own target -- it never stops anything
+#                 else. The release does stop that target whoever started
+#                 it, so flashing a chaser that is already running from
+#                 another pad stops it when you let go.
+#         solo    becomes the only live source. Read that literally: it
+#                 drops every scene AND every running chaser, beat-synced
+#                 ones included, then starts its own target. Use toggle if
+#                 you want a chaser to survive the press. The clear pad is
+#                 the same reach with nothing left standing.
+# colour  A name, or a raw palette index 0-127. Names available:
+#           red  amber  yellow_warm  yellow  green  turquoise  cyan  blue
+#           lavender  mauve  magenta  pink  warm_white  white  cold_white  uv
+#         Spaces, hyphens and capitals are all fine ("Warm White" works).
+#         See them on the grid with: python3 apc_leds.py names
+#
+#         A pad sits at 10% when idle and 100% when active -- same colour,
+#         ten times the light. If that is still not obvious enough, run
+#         controller.py --feedback pulse (or blink).

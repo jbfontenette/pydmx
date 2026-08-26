@@ -1,49 +1,98 @@
-# Bind APC mini mk2 controls to scenes.
-#
-# pad     raw note number, or friendlier notation:
-#           r0c0  grid row 0 col 0 -- ROW 0 IS THE BOTTOM ROW (note 0)
-#           t1    track button 1
-#           s1    scene launch button 1 (s1 is the TOP one)
-#
-# type    scene   activate a look
-#         clear   drop everything (panic button)
-#         reload  re-read scenes.csv and mapping.csv without restarting.
-#                 Flashes GREEN on success, RED for two seconds on failure.
-#                 Reload is atomic, so a broken CSV keeps the running show
-#                 AND keeps this button working. The one thing to avoid is
-#                 deleting this row -- a SUCCESSFUL reload without it leaves
-#                 you with no button. You get a warning if that happens.
-# mode    toggle  press on, press off. Stacks with other active scenes.
-#         flash   active only while held. Good for strobes and bumps.
-#                 Touches ONLY its own target -- it never stops anything
-#                 else. The release does stop that target whoever started
-#                 it, so flashing a chaser that is already running from
-#                 another pad stops it when you let go.
-#         solo    becomes the only live source. Read that literally: it
-#                 drops every scene AND every running chaser, beat-synced
-#                 ones included, then starts its own target. Use toggle if
-#                 you want a chaser to survive the press. The clear pad is
-#                 the same reach with nothing left standing.
-# colour  A name, or a raw palette index 0-127. Names available:
-#           red  amber  yellow_warm  yellow  green  turquoise  cyan  blue
-#           lavender  mauve  magenta  pink  warm_white  white  cold_white  uv
-#         Spaces, hyphens and capitals are all fine ("Warm White" works).
-#         See them on the grid with: python3 apc_leds.py names
-#
-#         A pad sits at 25% when idle and 100% when active -- same colour,
-#         four times the light. If that is still not obvious enough, run
-#         controller.py --feedback pulse (or blink).
 pad,type,target,mode,colour
-r0c0,scene,disco_red,toggle,red
-r0c1,scene,disco_green,toggle,green
-r0c2,scene,disco_blue,toggle,blue
-r0c3,scene,disco_on,toggle,white
-r1c0,scene,disco_mid,solo,amber
-r1c1,scene,disco_off,solo,cold_white
-# Held, not latched -- release and it drops out.
-r7c7,scene,disco_red,flash,magenta
-# Panic button: drop everything.
-t1,clear,,toggle,red
+r7c0,chaser,disco_funk-gold_room-saturday_groove,solo,magenta
+r7c1,chaser,dance_house-blue_room-deep_room,solo,cyan
+r7c2,chaser,techno-steel-hypnotic,solo,blue
+r7c3,chaser,hiphop_rnb-smoke-lounge,solo,mauve
+r7c4,chaser,eighties-miami-neon_cruise,solo,pink
+r7c5,chaser,latino_afro-sunset-tropical,solo,amber
+r7c6,chaser,pop-bubblegum-radio_edit,solo,magenta
+r7c7,chaser,rock-red_room-slow_burn,solo,red
+r6c0,chaser,disco_funk-gold_room-mirrorball_peak,solo,magenta
+r6c1,chaser,dance_house-blue_room-peak_time,solo,cyan
+r6c2,chaser,techno-steel-warehouse,solo,cold_white
+r6c3,chaser,hiphop_rnb-smoke-trap,solo,mauve
+r6c4,chaser,eighties-miami-stadium_80s,solo,pink
+r6c5,chaser,latino_afro-sunset-carnaval,solo,amber
+r6c6,chaser,pop-bubblegum-chorus_drop,solo,magenta
+r6c7,chaser,rock-red_room-anthem,solo,white
+r5c0,chaser,disco_funk-ice_palace-saturday_groove,solo,cyan
+r5c1,chaser,dance_house-ibiza-deep_room,solo,magenta
+r5c2,chaser,techno-acid-hypnotic,solo,green
+r5c3,chaser,hiphop_rnb-siren-lounge,solo,red
+r5c4,chaser,eighties-arcade-neon_cruise,solo,blue
+r5c5,chaser,latino_afro-salsa-tropical,solo,red
+r5c6,chaser,pop-sorbet-radio_edit,solo,turquoise
+r5c7,chaser,rock-midnight-slow_burn,solo,blue
+r4c0,chaser,disco_funk-ice_palace-mirrorball_peak,solo,cyan
+r4c1,chaser,dance_house-ibiza-peak_time,solo,magenta
+r4c2,chaser,techno-acid-warehouse,solo,cold_white
+r4c3,chaser,hiphop_rnb-siren-trap,solo,red
+r4c4,chaser,eighties-arcade-stadium_80s,solo,blue
+r4c5,chaser,latino_afro-salsa-carnaval,solo,red
+r4c6,chaser,pop-sorbet-chorus_drop,solo,turquoise
+r4c7,chaser,rock-midnight-anthem,solo,amber
+
+#r3c0,
+#r3c1,
+#r3c2,
+#r3c3,
+#r3c4,
+#r3c5,
+#r3c6,
+#r3c7,
+
+#r2c0,,,,
+#r2c1,
+#r2c2,
+#r2c3,
+#r2c4,
+#r2c5,
+#r2c6,
+#r2c7,
+
+#r1c0,,,,
+#r1c1
+#r1c2
+#r1c3
+#r1c4
+#r1c5
+#r1c6
+#r1c7
+
+#r0c0,,,,
+#r0c1,,,,
+#r0c2,,,,
+#r0c3,,,,
+#r0c4,,,,
+#r0c5,,,,
+#r0c6,,,,
+#r0c7,,,,
 
 # Re-read the CSVs live. Keep this row.
-s1,reload,,toggle,cyan
+s1,reload,,,cyan
+#s2,,,,
+#s3,,,,
+#s4,,,,
+#s5,,,,
+#s6,,,,
+#s7,,,,
+s8,clear,,,red
+
+t1,tap,,,white
+#t2,,,,
+#t3,,,,
+#t4,,,,
+#t5,,,,
+#t6,,,,
+#t7,,,,
+t8,chaser_step,,,blue
+
+f1,bpm,,,
+#f2,,,,
+#f3,,,,
+#f4,,,,
+#f5,,,,
+#f6,,,,
+f7,scale,par*.dimmer,,
+f8,scale,disco*.dimmer,,
+f9,master,,,

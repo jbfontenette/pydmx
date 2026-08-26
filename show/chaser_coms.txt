@@ -1,0 +1,29 @@
+# Chasers: ordered sequences of scenes.
+#
+#   chaser        name, referenced from mapping.csv
+#   step          ordering number. Steps are sorted by this, NOT by file
+#                 order, so you can insert 15 between 10 and 20 without
+#                 renumbering anything.
+#   scene         a scene name from scenes.csv
+#   duration_ms   auto-advance after this long.
+#                 0 or blank = HOLD until something advances it: a pad
+#                 bound as type 'chaser_step', or a beat.
+#   beats         advance after this many beats of an external clock.
+#                 Parsed and counted, but nothing feeds beats yet -- this
+#                 is here so OS2L from Virtual DJ can be added without
+#                 rewriting this file.
+#
+# A chaser with every duration_ms at 0 is fully manual. A chaser with
+# durations set can STILL be tapped forward early -- a manual advance always
+# works, it just resets that step's timer.
+#
+# In mapping.csv:
+#   pad,type,target,mode,colour
+#   r2c0,chaser,colour_walk,toggle,cyan     start/stop. mode applies:
+#                                           toggle | solo | flash
+#   r3c0,chaser_step,colour_walk,,white     advance THIS chaser one step
+#   r3c7,chaser_step,,,amber                advance EVERY running chaser
+#
+# Leave mode BLANK on chaser_step -- it fires once on press and never reads
+# the column, so writing "toggle" there only implies a latch that does not
+# exist. Same for clear and reload.
