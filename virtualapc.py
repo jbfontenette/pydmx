@@ -29,7 +29,7 @@ PULSE_4 = 9
 BLINK_4 = 14
 BLINK_2 = 15
 OFF = 0
-IDLE = SOLID_10
+IDLE = SOLID_25         # must match apc.py -- see the reasoning there
 
 FEEDBACK = {
     "intensity": SOLID_100,

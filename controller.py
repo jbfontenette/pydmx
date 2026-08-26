@@ -76,7 +76,7 @@ def build_leds(apc, show, eng, style="intensity", shift=False):
     the layout readable at a glance -- you learn where red lives, and its
     brightness tells you whether it is running.
 
-    'intensity' is the default: the fixed palette, 10%% when idle and 100%%
+    'intensity' is the default: the fixed palette, 25%% when idle and 100%%
     when active. 'rgb' uses SysEx for exact 24-bit colours, but SysEx pad
     colouring is unverified on this unit -- treat it as experimental.
     """

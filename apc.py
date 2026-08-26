@@ -35,10 +35,12 @@ BLINK_2 = 15
 
 OFF = 0          # velocity 0 = unlit
 
-# Idle sits at 10%, not 50%. At 50% an idle pad and an active one look nearly
-# identical -- the eye compares ratios, and 50:100 is only one stop apart.
-# 10:100 is ten times the light and unmistakable across a dark room.
-IDLE = SOLID_10
+# Idle sits well below active, not near it. At 50% an idle pad and an active
+# one look nearly identical -- the eye compares ratios, and 50:100 is only one
+# stop apart. 25:100 is four times the light, still unmistakable across a dark
+# room, and unlike 10% the idle pad is actually readable at a glance: at 10%
+# you could not see where the unlit bindings were. Keep this well under 50%.
+IDLE = SOLID_25
 
 # How an active binding is shown. Intensity is the default because it is the
 # only one guaranteed to work: pulse and blink rates sync to an external MIDI

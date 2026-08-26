@@ -30,8 +30,8 @@
 #         Spaces, hyphens and capitals are all fine ("Warm White" works).
 #         See them on the grid with: python3 apc_leds.py names
 #
-#         A pad sits at 10% when idle and 100% when active -- same colour,
-#         ten times the light. If that is still not obvious enough, run
+#         A pad sits at 25% when idle and 100% when active -- same colour,
+#         four times the light. If that is still not obvious enough, run
 #         controller.py --feedback pulse (or blink).
 pad,type,target,mode,colour
 r0c0,scene,disco_red,toggle,red
