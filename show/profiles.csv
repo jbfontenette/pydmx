@@ -1,35 +1,10 @@
-# Fixture TYPES. Transcribe straight from the manufacturer's DMX chart.
-# Write each model once, however many of them you own.
-#
-# offset  1-BASED, matching the manual's own numbering ("Channel 1: Dimmer").
-#         DMX channel = fixture address + offset - 1
-#
-# values  OPTIONAL. Plain-text names for the numbers, so scenes can say
-#         "red" instead of 10. Format: name=value, separated by ; or |
-#         A range is fine and usually better -- manuals document these as
-#         bands ("8-15 = red"), and a name resolves to the MIDDLE of its
-#         range, which is the safe place to sit. Edges are where an
-#         off-by-one puts you in the next colour.
-#           colors,3,snap,off=0;red=10;amber=18;green=42
-#           strobe,2,snap,off=0;slow=10-100;fast=101-200
-#         Mostly for snap channels, but fade channels can use them too.
-#         dmxmon.py shows the matching name beside the live value.
-#
-# mode    fade  a level (intensity, RGB, pan/tilt). Safe to crossfade. HTP.
-#         snap  a selector (colour wheel, gobo, strobe, mode). The value is an
-#               index into a lookup table, not a level. Must jump. LTP.
-#               Use the MIDDLE of the documented range, never an edge.
-#
-# REPLACE THESE with your real charts -- they are plausible shapes, not your rig.
 profile,feature,offset,mode,values
 rootpar6,dimmer,1,fade,off=0;full=255
-rootpar6,strobe,2,snap,off=0;slow=10-100;fast=101-200
-rootpar6,colors,3,snap,off=0;red=10;amber=18;green=42
-rootpar6,sound,4,fade,
-# A second model, to show the pattern. Note it has no colour wheel -- a scene
-# globbing "*" for colour will skip it with a warning rather than fail.
+rootpar6,strobe,2,snap,open=0-5;closed=6-10;range=128-250
+rootpar6,colors,3,snap,off=0-5;red=6-13;amber=14-21;yellow_warm=22-29;yellow=30-37;green=38-45;turquoise=46-53;cyan=54-61;blue=62-69;lavender=70-77;mauve=78-85;magenta=86-93;pink=94-101;warm_white=102-109;white=110-117;cold_white=118-125;uv=226-255
+rootpar6,sound,4,snap,off=0-5
 pst10,dimmer,1,fade,off=0;full=255
-pst10,strobe,2,snap,off=0;slow=10-100;fast=101-200
-pst10,colors,3,snap,off=0;red=15;green=25;blue=35
-pst10,sound,4,snap,off=0;on=128
-pst10,speed,5,fade,
+pst10,strobe,2,snap,off=0-9;range=10-255
+pst10,colors,3,snap,off=0-9;red=10-19;green=20-29;blue=30-39;white=40-49;yellow=50-59;magenta=60-69;cyan=70-79;dark_orange=80-89;green_yellow=90-99;salmon=100-109;turquoise=110-119;light_green=120-129;orange=130-139;straw=140-149;lavender=150-159;light_blue=160-169;dark_blue=170-179;pink=180-189;all_on=190-255
+pst10,sound,4,snap,off=0-9
+pst10,speed,5,snap,
