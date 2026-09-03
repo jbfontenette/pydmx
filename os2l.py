@@ -136,14 +136,17 @@ class BeatClock:
         self._thread.start()
 
     def stop(self):
+        # Order matters: signal, wait for the thread to leave, and only then
+        # close zeroconf. Closing it first can pull the registration out from
+        # under _advertise while the listener thread is still inside it.
         self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1.5)
         if self._zc:
             try:
                 self._zc.close()
             except Exception:
                 pass
-        if self._thread:
-            self._thread.join(timeout=1.5)
 
     # --- main-thread interface -------------------------------------------
     def poll(self):

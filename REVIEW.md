@@ -121,12 +121,16 @@ unambiguous claim on it, and a master that moves on its own during a reload
 is the surprise item 10 of the invariants list exists to prevent. It keeps
 its value until a fader is moved.
 
-### 5. `NullSender.send()` sleeps 22.6ms while holding nothing back
-`run_until` in NullSender never calls `send()` (correct), but
-`play_scene.py` and any code calling `send()` directly on a NullSender
-blocks the caller for a frame time for no reason. Harmless today; a trap
-for the next tool that calls `sender.send()` in a loop expecting it to be
-cheap. A `pass` with a comment would do.
+### 5. `NullSender.send()` sleeps 22.6ms while holding nothing back  (FIXED)
+`run_until` never calls it (correct), but any tool driving the sender by
+hand was blocked for a frame time for nothing. Now a `pass` with a comment
+saying why: there is no wire to keep clear, and a caller that wants a
+realistic frame rate should sleep for it visibly.
+
+One correction to the original note: `play_scene.py` was named as a caller
+and is not one — it only uses `apply()` and `run_until`. The only direct
+`send()` callers are in `dmx_cycle.py`, against a real adapter, which is
+why nothing depended on the pacing.
 
 ### 6. `Show.reload()` mutates in place; readers see mixed generations  (MOOT)
 `reload()` is atomic with respect to *parse failure* (good) but not with
@@ -195,13 +199,11 @@ dropped with a reason, the good beats still arrive, the thread stays alive
 and the tempo holds. Before the change the same sequence killed the thread
 and the next write got a broken pipe.
 
-### 12. `check_adapter` + `DmxSender` race
-`check_adapter` finds the port, then `DmxSender.__init__` globs again via
-`find_port()` only if `port=None` — controller passes nothing, so the port
-found in preflight and the port opened can differ if devices change in
-between. Cosmetic in practice (both pick `sorted()[0]`), but passing the
-checked port into `DmxSender(port=port)` costs one word and removes the
-window.
+### 12. `check_adapter` + `DmxSender` race  (FIXED)
+`check_adapter` found the port, then `DmxSender.__init__` globbed again
+because the controller passed nothing, so the port checked and the port
+opened could differ if devices changed in between. The controller now
+passes what preflight found: `dmx.DmxSender(port=port, ...)`.
 
 ---
 
@@ -231,10 +233,23 @@ SHIFT before a flash pad still stops the right target. This is right, and
 easy to break in refactoring. Worth a test — it's the kind of correctness
 that survives only as long as nobody "simplifies" it.
 
-### 16. Two sources of truth for the surface constant tables
-apc.py and virtualapc.py duplicate GRID/TRACK/SCENE/FEEDBACK constants.
-They agree today. A `surface_constants.py` both import from would make
-drift impossible; alternatively a startup assert comparing them.
+### 16. Two sources of truth for the surface constant tables  (FIXED)
+apc.py and virtualapc.py duplicated GRID/TRACK/SCENE/FEEDBACK — and it was
+three copies, not two, counting apc_leds.py. They did **not** stay in
+agreement: moving idle from 10% to 25% took three edits and the third was
+missed, leaving the contrast test previewing a gap the controller no longer
+produced.
+
+Now `surface_constants.py`, which depends on nothing, holds the table; apc.py
+and virtualapc.py import the names explicitly and re-export them, so
+`apc_mod.GRID` and `apc_mod.IDLE` still work for every call site. apc_leds.py
+keeps its own sixteen-entry protocol table on purpose — listing every
+behaviour is that tool's job — but takes `IDLE` from the shared file and
+derives its printed label from it.
+
+`TestSurfaceConstants` checks both surfaces against the shared table name for
+name (the real one where mido is installed), which is the test that would
+have caught the original drift.
 
 ### 17. dmxmon reads the patch once at startup
 Already documented in conversation, restated for the file: a reload in the
@@ -246,24 +261,33 @@ becomes annoying.
 
 ## D. Small correctness nits
 
-18. controller.py docstring: the usage block got split by a later insert —
-    `--check`/`--feedback` lines now sit *below* the tempo-fallback
-    paragraph, reading as if they belong to it.
-19. `if True:` block in the main loop (beat drain) is a leftover from a
-    patch — harmless, should be flattened for readability.
-20. `describe_active` calls `chaser_position` twice per chaser in the
-    step-all log path in `handle()` (minor, log-path only).
+18. **(FIXED)** controller.py docstring: the usage block had been split by a
+    later insert, leaving `--check`/`--feedback` below the tempo-fallback
+    paragraph as if they belonged to it. The flags are one block again, with
+    the tempo paragraph after them — and `--watch`, which was never listed
+    at all, is now in it.
+19. **(FIXED)** `if True:` in the main loop (beat drain), a leftover from a
+    patch. Flattened.
+20. **(NOT REPRODUCIBLE)** The claim was that `describe_active` calls
+    `chaser_position` twice per chaser in the step-all log path.
+    `chaser_position` has exactly one call site in the whole of
+    controller.py — inside `describe_active`, reached once per chaser per
+    log line. Either this was fixed by an earlier change or the reading was
+    wrong. No code change.
 21. `flash_pad`'s grid-pad branch paints colour but never repaints after
     `flash_until` expiry if `eng.dirty` never goes true in between — the
     expiry sets `relayout`, which does handle it. Verified fine; noted so
     the double mechanism (relayout flag vs dirty) is understood as
     intentional.
-22. `os2l.BeatClock.stop()` closes zeroconf before joining the thread; if
-    the thread is inside `_advertise` teardown this could race. Order:
-    set stop event, join, then close zeroconf.
-23. `bpm_from_fader` rounds to int; `TapTempo.bpm` rounds to 0.1. The
-    display code prints both through the same path, so a tapped 119.9
-    and a fader 120 read differently. Cosmetic.
+22. **(FIXED)** `os2l.BeatClock.stop()` closed zeroconf before joining the
+    thread. Now: set the stop event, join, then close.
+23. **(NOT REPRODUCIBLE)** The claim was that a tapped 119.9 and a fader 120
+    "read differently". They do not: `set_bpm` stores `float(bpm)`, so the
+    fader path prints `120.0` and the tap path `119.8` — both one decimal,
+    through the same f-string. What differs is input resolution (the fader
+    has 127 steps across 60-180 BPM, so it can only land on whole numbers;
+    a tap can land anywhere), and that is inherent, not a display bug. No
+    code change.
 
 ---
 

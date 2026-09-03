@@ -10,16 +10,17 @@
     python3 controller.py --os2l        # beat sync from Virtual DJ
     python3 controller.py --os2l 9997   # ...on a non-default port
     python3 controller.py --os2l --beats  # log every beat (noisy, debugging)
-
-Tempo fallback: bind a fader to 'bpm' and a pad to 'tap' in mapping.csv.
-The internal clock stays silent until you give it a tempo, and yields to
-VirtualDJ whenever VirtualDJ is actually delivering beats.
+    python3 controller.py --watch       # reload the CSVs when they change
     python3 controller.py --check       # validate CSVs, touch no hardware
     python3 controller.py --feedback pulse   # active pads pulse instead
     python3 controller.py --feedback blink   # active pads blink instead
     python3 controller.py --feedback rgb     # EXPERIMENTAL, SysEx 24-bit
 
 --feedback is a controller.py flag only. apc_leds.py does not accept it.
+
+Tempo fallback: bind a fader to 'bpm' and a pad to 'tap' in mapping.csv.
+The internal clock stays silent until you give it a tempo, and yields to
+VirtualDJ whenever VirtualDJ is actually delivering beats.
 
 Three threads, each with exactly one job:
 
@@ -469,7 +470,11 @@ def main():
             sys.exit(f"ADAPTER: {problem}")
         print(f"DMX on {port}")
         try:
-            sender = dmx.DmxSender(on_status=lambda m: print(f"  [{m}]"))
+            # Pass the port preflight just found. Without it DmxSender globs
+            # again, and a device appearing or vanishing in between would
+            # open a different adapter than the one that was checked.
+            sender = dmx.DmxSender(port=port,
+                                   on_status=lambda m: print(f"  [{m}]"))
         except dmx.AdapterError as exc:
             sys.exit(str(exc))
 
@@ -660,16 +665,15 @@ def main():
                     else:
                         print("  [clock: none -- beat chasers holding]")
 
-                if True:
-                    for beat in beats:
-                        eng.on_beat(beat)
+                for beat in beats:
+                    eng.on_beat(beat)
+                    if log_beats:
+                        print(f"  beat {beat.pos} {beat.bpm:g}bpm"
+                              + ("  bar" if beat.is_bar else ""))
+                if clock is not None:
+                    for message in clock.poll_messages():
                         if log_beats:
-                            print(f"  beat {beat.pos} {beat.bpm:g}bpm"
-                                  + ("  bar" if beat.is_bar else ""))
-                    if clock is not None:
-                        for message in clock.poll_messages():
-                            if log_beats:
-                                print(f"  os2l {message}")
+                            print(f"  os2l {message}")
 
                 pending = state.get("bpm_pending")
                 if pending and time.monotonic() - pending > 0.3:
