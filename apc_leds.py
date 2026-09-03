@@ -251,11 +251,13 @@ def test_contrast(out):
     """Idle vs active brightness, side by side, so you can judge the gap."""
     import colours
     clear_grid(out)
-    print("Left half of each row = IDLE (10%), right half = ACTIVE (100%).\n")
+    print("Left half of each row = IDLE (25%), right half = ACTIVE (100%).\n")
     for i, name in enumerate(colours.ORDER[:8]):
         index = colours.palette(name)
         for col in range(4):
-            pad(out, note_at(i, col), index, SOLID_10)
+            # Must stay whatever apc.IDLE is, or this test previews a
+            # contrast the controller does not actually produce.
+            pad(out, note_at(i, col), index, SOLID_25)
         for col in range(4, 8):
             pad(out, note_at(i, col), index, SOLID_100)
         print(f"  row {i}  {name}")
