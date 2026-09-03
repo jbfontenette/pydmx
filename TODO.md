@@ -2,27 +2,33 @@
 
 Things deliberately deferred, with enough context to pick up cold.
 
-## Validation still owed
+Known bugs and review findings live in `REVIEW.md`, not here. This file is
+for hardware, validation and things the code cannot tell you.
 
-**Full-load timing test.** So far only validated with one fixture on a short
-cable, with nothing else running. Need to confirm the output holds up with:
+The "design decisions to carry into the scene engine" that used to sit here
+have all landed: snap-vs-fade is the `mode` column in `profiles.csv`
+(CLAUDE.md invariant 1), and named values resolving to the middle of their
+range is `Feature.resolve` in `showfile.py`.
 
-- all fixtures connected on the real cable run
-- Virtual DJ running simultaneously
+## Validation — DONE
 
-Why it matters: the Python send loop is not real-time. If another process
-steals CPU, `time.sleep()` overshoots and the next DMX break can land while
-the FTDI FIFO is still transmitting the previous frame — which truncates it
-and shows as flicker. The `_wire_free_at` guard in `DmxSender.send()` is the
-defence; this test is what proves it works under contention.
+**Full-load timing test: PASSED.** A six-hour live show ran without flicker
+or dropout, with the full rig on the real cable run and the 120Ω termination
+fitted. That was the open question: the Python send loop is not real-time, so
+if another process steals CPU, `time.sleep()` overshoots and the next DMX
+break can land while the FTDI FIFO is still transmitting the previous frame,
+truncating it. Six hours is a long soak, and the `_wire_free_at` guard in
+`DmxSender.send()` held.
 
-What to watch: reported fps holding near target, and no visible flicker on a
-fixture held at a static level.
+Still worth confirming for the record: whether Virtual DJ was driving beats
+over OS2L for the whole set. The mapping binds a bpm fader and a tap pad as
+well, so the set could have run on the internal clock — in which case the
+"another process competing for CPU" half of the test is softer than it looks.
 
-If it fails: drop `REFRESH_HZ` to 25, then 20. Receivers hold their last
-value indefinitely, so a low refresh rate costs nothing until fast chases are
-in play. If that isn't enough, the hardware fix is an Enttec DMX USB Pro,
-which does frame timing in firmware instead of on the host.
+If flicker ever appears: drop `DEFAULT_REFRESH_HZ` (dmx.py) to 25, then 20.
+Receivers hold their last value indefinitely, so a low refresh rate costs
+nothing until fast chases are in play. If that isn't enough, the hardware fix
+is an Enttec DMX USB Pro, which does frame timing in firmware.
 
 **Fixture count is not a timing risk.** DMX is broadcast — the same 513 bytes
 go out regardless of how many fixtures listen. Adding fixtures is an
@@ -30,27 +36,14 @@ electrical question, not a software one.
 
 ## Hardware
 
-**120Ω termination resistor**, across pins 2 and 3 at the *last* fixture in
-the chain. Currently missing. Getting away with it on one fixture and a short
-cable; will not get away with it on a longer run with several fixtures.
-Symptom of missing termination is reflection-induced flicker that gets worse
-with cable length — easy to misdiagnose as a software timing problem.
+**120Ω termination resistor: FITTED.** Across pins 2 and 3 at the last
+fixture in the chain. Missing termination shows as reflection-induced flicker
+that worsens with cable length — easy to misdiagnose as a software timing
+problem, so if flicker ever returns, confirm the resistor is still in place
+before touching `dmx.py`.
 
 **RS485 unit load limit** is around 32 devices on one line. Beyond that, or
-for long runs, a DMX splitter/booster is needed.
-
-## Design decisions to carry into the scene engine
-
-**Function channels must snap, not fade.** Colour wheel, gobo, strobe and
-mode channels are selectors — the value is an index into the fixture's
-lookup table, not a level. Crossfading one sweeps through every intervening
-colour or mode. Intensity and RGB channels fade; function channels jump.
-
-Implication: the scene CSV needs a per-channel flag for whether a channel is
-fade-able. Decide the column name when building the loader.
-
-**Use mid-range values for function channels.** Fixture charts specify ranges
-(e.g. 8–15 = red). Target the middle of the range, not an edge.
+for long runs, a DMX splitter/booster is needed. Not close to it yet.
 
 ## Notes from testing so far
 
