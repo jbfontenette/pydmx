@@ -92,10 +92,12 @@ class TapTempo:
 class InternalClock:
     """Emits beats at a set tempo. Disarmed until given one."""
 
-    def __init__(self):
+    def __init__(self, on_status=None):
         self.bpm = 0.0
         self.armed = False
         self.source = None            # 'fader' or 'tap', for reporting
+        self.on_status = on_status or (lambda msg: None)
+        self.reanchors = 0
         self._next_at = 0.0
         self._pos = 0
         self.tapper = TapTempo()
@@ -158,8 +160,18 @@ class InternalClock:
         # Guard against a long stall (laptop sleep, a blocking reload)
         # producing a burst of catch-up beats that would race the chaser
         # through several steps at once.
-        if now - self._next_at > period * 4:
+        #
+        # Re-anchoring is the right call, but it is not free: the beat now
+        # lands wherever the stall ended, so a tapped downbeat has quietly
+        # moved. Say so. Chasers derive position from pos, which keeps
+        # counting, so nothing jumps a step -- what shifts is the phase
+        # against the music, and only an ear can judge that.
+        behind = now - self._next_at
+        if behind > period * 4:
             self._next_at = now
+            self.reanchors += 1
+            self.on_status(f"re-anchored after a {behind:.1f}s stall -- "
+                           f"phase shifted, re-tap if it has drifted")
         while now >= self._next_at:
             out.append(Beat(pos=self._pos, bpm=self.bpm, strength=None,
                             change=False, at=self._next_at))

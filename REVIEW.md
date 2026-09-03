@@ -153,7 +153,7 @@ a fader is moved in the simulator. The HELLO handler could re-trigger the
 enquiry (`self.link.send(ENQUIRE)`) or apcsim could volunteer an INTRO on
 connect. Minor, but it's the first thing a new user of `--sim` hits.
 
-### 8. The OS2L `_beats` deque can drop beats silently
+### 8. The OS2L `_beats` deque can drop beats silently  (FIXED)
 `deque(maxlen=64)` discards the *oldest* on overflow. 64 beats is ~28s at
 138bpm, so this only fires if the main loop stalls badly — but the one
 thing that stalls it is a big synchronous reload (item under D-14), and the
@@ -162,11 +162,29 @@ lands correctly afterwards, so severity is low, but a counter of dropped
 beats reported once (like the monitor's stats) would make the invisible
 visible.
 
-### 9. `tempo.InternalClock.poll()` catch-up guard hides its own reports
-The `> period * 4` guard silently re-anchors after a stall (laptop sleep).
-Correct behaviour, but it also resets after a *blocking reload*, so a
-tapped phase quietly shifts. One `on_status`-style callback or a returned
-flag ("re-anchored, phase lost") would let the controller print it.
+**Fix as applied:** `BeatClock.dropped_beats` counts every overflow and the
+first one is reported through `on_status`, once, in the same shape as the
+malformed-message report. Deliberately still a report rather than a bigger
+queue: if this fires, something stalled the main loop for ~28s and *that* is
+the bug — a deeper queue would only hide it for longer.
+
+### 9. `tempo.InternalClock.poll()` catch-up guard hides its own reports  (FIXED)
+The `> period * 4` re-anchor is correct — a burst of catch-up beats would
+race a chaser through several steps — but it was silent, so a tapped downbeat
+could move without a word. `InternalClock` now takes an `on_status` callback,
+the same pattern `DmxSender` and `BeatClock` use, counts re-anchors, and the
+controller prints them alongside the other clock messages.
+
+Verified on a live `--sim` controller by arming the bpm fader and stopping
+the process with SIGSTOP for five seconds:
+
+    [clock: re-anchored after a 5.0s stall -- phase shifted, re-tap if it
+     has drifted]
+
+Matters more here than the original note suggested: this show runs 34
+beat-synced chasers, and pos keeps counting through a re-anchor, so nothing
+jumps a step — what moves is the phase against the music, which only an ear
+can catch. Now the terminal says it happened.
 
 ### 10. Fader 1-step diff suppression can strand the last position  (FIXED)
 `set_level`/`set_scale` skipped when the value was unchanged — but they

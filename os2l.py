@@ -128,7 +128,9 @@ class BeatClock:
         self.last_beat_at = 0.0
         self.total_beats = 0
         self.bad_messages = 0
+        self.dropped_beats = 0
         self._last_bad = None
+        self._said_dropping = False
 
     # --- lifecycle --------------------------------------------------------
     def start(self):
@@ -271,6 +273,21 @@ class BeatClock:
         self.bpm = bpm
         self.last_beat_at = beat.at
         self.total_beats += 1
+
+        # The deque discards the OLDEST on overflow, so a main loop that
+        # stalls for ~28s at 138bpm silently loses the beats it never drained
+        # -- and the only visible symptom is a beat-synced chaser appearing
+        # to jump. Phase derivation means it lands correctly again on the
+        # next beat, so this is worth reporting rather than fixing: if it
+        # ever fires, something stalled the main loop badly and THAT is the
+        # bug. Said once, then counted.
+        if len(self._beats) == self._beats.maxlen:
+            self.dropped_beats += 1
+            if not self._said_dropping:
+                self._said_dropping = True
+                self.on_status(f"beat queue full ({self._beats.maxlen}) -- "
+                               f"the main loop is not draining it; beats are "
+                               f"being dropped")
         self._beats.append(beat)
 
     def _dropped(self, msg, exc):

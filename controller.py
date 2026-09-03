@@ -479,7 +479,8 @@ def main():
             sys.exit(str(exc))
 
     import tempo
-    internal = tempo.InternalClock()
+    internal = tempo.InternalClock(
+        on_status=lambda m: print(f"  [clock: {m}]"))
 
     clock = None
     if os2l_port is not None:

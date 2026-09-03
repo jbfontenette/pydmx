@@ -144,6 +144,24 @@ class TestOS2LBadMessages(unittest.TestCase):
         self.feed({"evt": "beat", "pos": "one"})
         self.assertEqual(len(self.status), 2)
 
+    def test_an_undrained_queue_says_so_once(self):
+        # The deque drops the OLDEST on overflow, so beats vanish silently
+        # and the only symptom is a chaser appearing to jump. If this fires,
+        # something stalled the main loop -- that is the actual bug, and it
+        # cannot be found if the queue swallows the evidence.
+        for pos in range(70):                   # maxlen is 64
+            self.feed(self.good(pos))
+        self.assertEqual(self.clock.dropped_beats, 6)
+        self.assertEqual(len(self.status), 1)
+        self.assertIn("not draining", self.status[0])
+
+    def test_a_drained_queue_says_nothing(self):
+        for pos in range(200):
+            self.feed(self.good(pos))
+            self.clock.poll()                   # the main loop, keeping up
+        self.assertEqual(self.clock.dropped_beats, 0)
+        self.assertEqual(self.status, [])
+
     def test_non_beat_messages_still_pass_through(self):
         self.feed({"evt": "btn", "name": "pad1", "state": True})
         self.assertEqual(len(self.clock.poll_messages()), 1)
@@ -232,6 +250,30 @@ class TestInternalClock(unittest.TestCase):
         clock.set_bpm(120, now=0.0)
         clock.poll(now=0.0)
         self.assertLessEqual(len(clock.poll(now=60.0)), 2)
+
+    def test_a_stall_says_it_moved_the_phase(self):
+        # Re-anchoring is right, but it silently shifts a tapped downbeat.
+        # Silence is what made this invisible: the beats keep coming, just
+        # against different moments than the ones that were tapped.
+        said = []
+        clock = tempo.InternalClock(on_status=said.append)
+        clock.set_bpm(120, now=0.0)
+        clock.poll(now=0.0)
+        clock.poll(now=60.0)
+        self.assertEqual(clock.reanchors, 1)
+        self.assertEqual(len(said), 1)
+        self.assertIn("re-anchored", said[0])
+
+    def test_normal_polling_says_nothing(self):
+        # It must stay quiet through ordinary running, or the message is
+        # noise and gets ignored on the night it matters.
+        said = []
+        clock = tempo.InternalClock(on_status=said.append)
+        clock.set_bpm(120, now=0.0)
+        for tick in range(20):
+            clock.poll(now=tick * 0.1)
+        self.assertEqual(said, [])
+        self.assertEqual(clock.reanchors, 0)
 
 
 class TestColours(unittest.TestCase):
