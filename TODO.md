@@ -13,17 +13,16 @@ range is `Feature.resolve` in `showfile.py`.
 ## Validation — DONE
 
 **Full-load timing test: PASSED.** A six-hour live show ran without flicker
-or dropout, with the full rig on the real cable run and the 120Ω termination
-fitted. That was the open question: the Python send loop is not real-time, so
-if another process steals CPU, `time.sleep()` overshoots and the next DMX
-break can land while the FTDI FIFO is still transmitting the previous frame,
-truncating it. Six hours is a long soak, and the `_wire_free_at` guard in
-`DmxSender.send()` held.
+or dropout, with the full rig on the real cable run, the 120Ω termination
+fitted, and Virtual DJ driving the beat over OS2L for the whole set. Both
+conditions this test was waiting on are therefore met.
 
-Still worth confirming for the record: whether Virtual DJ was driving beats
-over OS2L for the whole set. The mapping binds a bpm fader and a tap pad as
-well, so the set could have run on the internal clock — in which case the
-"another process competing for CPU" half of the test is softer than it looks.
+That was the open question: the Python send loop is not real-time, so if
+another process steals CPU, `time.sleep()` overshoots and the next DMX break
+can land while the FTDI FIFO is still transmitting the previous frame,
+truncating it. Virtual DJ decoding audio for six hours is exactly the
+competing load the test needed, and the `_wire_free_at` guard in
+`DmxSender.send()` held throughout.
 
 If flicker ever appears: drop `DEFAULT_REFRESH_HZ` (dmx.py) to 25, then 20.
 Receivers hold their last value indefinitely, so a low refresh rate costs
