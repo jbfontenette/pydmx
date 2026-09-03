@@ -46,9 +46,23 @@ class VirtualAPC:
             elif kind == simlink.FADER and len(payload) >= 3:
                 events.append(("fader", payload[1], payload[2]))
             elif kind == simlink.INTRO and len(payload) >= 10:
-                self._pending_faders = list(payload[1:10])
+                positions = list(payload[1:10])
+                self._pending_faders = positions
+                # An INTRO arriving here rather than inside introduce() means
+                # the simulator has just (re)appeared and told us where its
+                # faders are. Turn it into ordinary fader events so the
+                # controller applies them through the same path a physical
+                # move takes -- otherwise master sits wherever a failed
+                # introduce() left it, which is 0, and the rig stays dark
+                # until something is touched. introduce() throws poll()'s
+                # return away, so the startup path cannot double-apply.
+                events.extend(("fader", number, value)
+                              for number, value in enumerate(positions, 1))
             elif kind == simlink.HELLO:
                 self._resend_all()
+                # The LED cache covers the surface, but nothing on this side
+                # knows where the simulator's faders are sitting. Ask.
+                self.link.send(bytes([simlink.ENQUIRE]))
         return events
 
     def _resend_all(self):

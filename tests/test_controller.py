@@ -382,6 +382,62 @@ class TestWatchDetector(unittest.TestCase):
         self.assertEqual(self.eng.active, [("scene", "warm")])
 
 
+class TestHeldBindingCapture(unittest.TestCase):
+    """Release uses the binding captured at PRESS, not a fresh lookup.
+
+    REVIEW item 15: this is correct and subtle, and the kind of thing a
+    refactor "simplifies" away. If release looked the binding up again, then
+    letting go of SHIFT while still holding a flash pad would resolve to the
+    OTHER layer and stop the wrong scene -- leaving the one you are holding
+    stranded on, with no pad that turns it off.
+    """
+
+    MAPPING = ("pad,type,target,mode,colour,shift\n"
+               "r0c0,scene,warm,flash,red,\n"
+               "r0c0,scene,half,flash,blue,yes\n")
+
+    def setUp(self):
+        import virtualapc
+        self.previous = controller._SURFACE_MODULE
+        controller._SURFACE_MODULE = virtualapc
+        self.addCleanup(setattr, controller, "_SURFACE_MODULE", self.previous)
+        self.dir = helper.temp_show(mapping=self.MAPPING)
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.show, self.eng = show_and_engine(self.dir)
+        self.state = {"shift": False, "held": {}, "relayout": False,
+                      "master_pending": None, "bpm_pending": None,
+                      "flash_until": 0.0, "internal": None}
+
+    def event(self, *parts):
+        controller.handle(parts, self.show, self.eng,
+                          lambda m: None, self.state, {})
+
+    def test_releasing_shift_first_still_stops_the_right_scene(self):
+        import virtualapc
+        self.event("press", virtualapc.SHIFT)
+        self.event("press", 0)                  # shift layer -> 'half'
+        self.assertEqual(self.eng.active, [("scene", "half")])
+
+        self.event("release", virtualapc.SHIFT)  # let go of SHIFT first
+        self.event("release", 0)
+
+        # 'half' was captured at press, so 'half' is what stops. A fresh
+        # lookup here would have resolved to 'warm' and left 'half' on.
+        self.assertEqual(self.eng.active, [])
+
+    def test_the_base_layer_still_works_on_its_own(self):
+        self.event("press", 0)
+        self.assertEqual(self.eng.active, [("scene", "warm")])
+        self.event("release", 0)
+        self.assertEqual(self.eng.active, [])
+
+    def test_a_release_with_nothing_held_is_ignored(self):
+        # Releases arrive for pads that were never pressed -- a press that
+        # landed before startup, or a repeat. It must not raise.
+        self.event("release", 0)
+        self.assertEqual(self.eng.active, [])
+
+
 class TestFlashRelease(unittest.TestCase):
     """A flash pad reaches only its own target -- but it does reach it.
 

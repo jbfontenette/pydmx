@@ -352,6 +352,62 @@ class TestSurfaceConstants(unittest.TestCase):
         self.assertNotIn(sc.IDLE, sc.FEEDBACK.values())
 
 
+class TestSimulatorReconnect(unittest.TestCase):
+    """A simulator that starts late must not leave the rig dark.
+
+    introduce() times out when apcsim is not up yet, so master fails safe to
+    0. The simulator then announces itself with HELLO -- at which point the
+    controller has to ask again where the faders are, or everything stays at
+    0 until a fader is physically moved. That is the first thing a new user
+    of --sim hits.
+    """
+
+    class StubLink:
+        """Stands in for simlink.Endpoint. No socket, no ports to collide."""
+
+        def __init__(self, incoming=()):
+            self.incoming = list(incoming)
+            self.sent = []
+
+        def drain(self):
+            out, self.incoming = self.incoming, []
+            return out
+
+        def send(self, payload):
+            self.sent.append(bytes(payload))
+
+    def surface(self, *incoming):
+        import virtualapc
+        apc = virtualapc.VirtualAPC.__new__(virtualapc.VirtualAPC)
+        apc._led = {}
+        apc._pending_faders = None
+        apc.link = self.StubLink(incoming)
+        return apc
+
+    def test_hello_asks_where_the_faders_are(self):
+        apc = self.surface(bytes([simlink.HELLO]))
+        apc.poll()
+        self.assertIn(bytes([simlink.ENQUIRE]), apc.link.sent)
+
+    def test_a_late_intro_becomes_fader_events(self):
+        # Outside introduce(), an INTRO is news: the surface just told us
+        # where it is sitting, and those positions have to reach the engine
+        # through the same path a physical move takes.
+        positions = [0, 10, 0, 0, 0, 0, 0, 0, 127]
+        apc = self.surface(bytes([simlink.INTRO] + positions))
+        events = apc.poll()
+        self.assertEqual(events[0], ("fader", 1, 0))
+        self.assertEqual(events[1], ("fader", 2, 10))
+        self.assertEqual(events[8], ("fader", 9, 127))
+
+    def test_introduce_still_returns_the_positions(self):
+        # introduce() throws poll()'s return away, so the startup path reads
+        # the positions once and cannot double-apply them.
+        positions = [0] * 8 + [127]
+        apc = self.surface(bytes([simlink.INTRO] + positions))
+        self.assertEqual(apc.introduce(timeout=0.1), positions)
+
+
 class TestWireFormats(unittest.TestCase):
     def test_monitor_addresses(self):
         self.assertEqual(monitor.parse_addr(None), monitor.DEFAULT_ADDR)

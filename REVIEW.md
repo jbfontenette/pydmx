@@ -145,13 +145,25 @@ by adding locks around each field instead.
 
 ## B. Robustness gaps (won't crash, will confuse)
 
-### 7. `introduce()` failure path sets master to 0 even in `--sim`
-If apcsim.py isn't running yet when the controller starts, `introduce()`
-times out and master goes to 0 — then the simulator's HELLO resync repaints
-LEDs but **does not replay fader positions**, so the rig stays dark until
-a fader is moved in the simulator. The HELLO handler could re-trigger the
-enquiry (`self.link.send(ENQUIRE)`) or apcsim could volunteer an INTRO on
-connect. Minor, but it's the first thing a new user of `--sim` hits.
+### 7. `introduce()` failure path sets master to 0 even in `--sim`  (FIXED)
+If apcsim.py wasn't running yet when the controller started, `introduce()`
+timed out and master went to 0 — correct, per invariant 10 — but the
+simulator's HELLO resync then repainted LEDs **without** replaying fader
+positions, so the rig stayed dark until a fader was physically moved.
+
+**Fix as applied**, entirely controller-side, since apcsim already answers
+`ENQUIRE` at any time: `virtualapc.poll()` sends an `ENQUIRE` when it sees a
+HELLO, and turns an `INTRO` arriving outside `introduce()` into ordinary
+`("fader", n, value)` events. `handle()` already routes those through
+`apply_fader`, so the positions arrive by the same path a physical move
+takes and no new machinery exists. `introduce()` discards `poll()`'s return
+value, so the startup path cannot double-apply.
+
+Verified by starting a real controller with no simulator, letting the
+Introduction time out, then announcing a simulator with HELLO: the
+controller asks for the positions, master goes 0 → 255, and a pad press
+lights channels that were dark before. Confirmed against the pre-fix code
+that the same sequence leaves the rig at nothing.
 
 ### 8. The OS2L `_beats` deque can drop beats silently  (FIXED)
 `deque(maxlen=64)` discards the *oldest* on overflow. 64 beats is ~28s at
@@ -245,11 +257,16 @@ becomes user-visible around 1000+ scenes. If it ever matters, parse on a
 worker thread and hand the finished object set to the main loop for the
 swap — the `_parse()` structure already supports exactly that.
 
-### 15. `handle()`'s held-binding capture is correct and subtle
+### 15. `handle()`'s held-binding capture is correct and subtle  (TESTED)
 Release uses the binding captured at press (`state["held"]`), so releasing
 SHIFT before a flash pad still stops the right target. This is right, and
-easy to break in refactoring. Worth a test — it's the kind of correctness
-that survives only as long as nobody "simplifies" it.
+easy to break in refactoring.
+
+`TestHeldBindingCapture` now pins it: press a flash pad on the SHIFT layer,
+release SHIFT, release the pad, and the scene captured at press is the one
+that stops. Confirmed the test fails when the release path is "simplified"
+into a fresh `binding_for()` lookup — which strands the held scene on, with
+no pad left that turns it off.
 
 ### 16. Two sources of truth for the surface constant tables  (FIXED)
 apc.py and virtualapc.py duplicated GRID/TRACK/SCENE/FEEDBACK — and it was
@@ -319,8 +336,27 @@ becomes annoying.
 4. ~~Add the engine thread-contract docstring (13) while the reasoning is
    fresh.~~ **Done.**
 
-Everything else is optional polish. The core architecture — one transmit
-thread, state mutation on the main loop, queues at every thread boundary,
-phase-derived beat sync — held up well under reading; the bugs are all at
-the seams where later features (watch, faders, reload) were bolted on
-without re-checking the threading doctrine.
+Everything else was optional polish, and has since been done too. The core
+architecture — one transmit thread, state mutation on the main loop, queues
+at every thread boundary, phase-derived beat sync — held up well under
+reading; the bugs were all at the seams where later features (watch, faders,
+reload) were bolted on without re-checking the threading doctrine.
+
+## Where this stands
+
+Every actionable item is closed. What is left is deliberate:
+
+- **3** — `solo` stopping chasers is documented and pinned, not changed. The
+  decision is open to revisit; the two alternatives are written out under
+  the item. The show's 32 `solo` chaser pads are an argument for leaving it.
+- **14** — reload is synchronous in the main loop. Measured ~50ms at 300
+  scenes; this show has 201, so it is not user-visible. The `_parse()`
+  structure already supports moving it to a worker if it ever is.
+- **17** — dmxmon reads the patch once at startup, so a reload does not
+  re-label it. Known limitation, not worth the mtime watching it would need.
+- **20, 23** — checked and not reproducible. See the notes on each.
+- **21** — verified correct when the review was written; still is.
+
+The live validation that matters: a six-hour show with the full rig, real
+cable run, 120Ω termination, and Virtual DJ driving the beat throughout, with
+no flicker and no dropout.
