@@ -269,6 +269,47 @@ class TestColours(unittest.TestCase):
         self.assertLess(max(idle), max(full) / 4)
 
 
+class TestSurfaceConstants(unittest.TestCase):
+    """The real surface and the simulator must describe the same device.
+
+    controller.py reaches every one of these through whichever module it
+    happens to hold, so a difference between them is a bug that only shows up
+    in one of the two setups -- the hardest kind to notice. They share one
+    source now; this checks the re-exports did not miss anything.
+    """
+
+    SHARED = ("GRID", "TRACK_BUTTONS", "SCENE_BUTTONS", "SHIFT", "FADER_CC",
+              "SOLID_10", "SOLID_25", "SOLID_50", "SOLID_100",
+              "PULSE_4", "BLINK_4", "BLINK_2", "OFF", "IDLE", "FEEDBACK")
+
+    def test_the_simulator_matches_the_shared_table(self):
+        import surface_constants
+        import virtualapc
+        for name in self.SHARED:
+            self.assertEqual(getattr(virtualapc, name),
+                             getattr(surface_constants, name), name)
+
+    def test_the_real_surface_matches_the_shared_table(self):
+        # apc.py needs mido. Where it is installed -- a machine that can
+        # actually drive the hardware -- check it too; elsewhere the
+        # simulator check above still covers the re-export.
+        try:
+            import apc
+        except ImportError:
+            self.skipTest("mido not installed")
+        import surface_constants
+        for name in self.SHARED:
+            self.assertEqual(getattr(apc, name),
+                             getattr(surface_constants, name), name)
+
+    def test_idle_is_dimmer_than_every_active_style(self):
+        # The point of the brightness scheme: an idle pad must never be as
+        # bright as an active one, whichever feedback style is selected.
+        import surface_constants as sc
+        self.assertLess(sc.IDLE, sc.SOLID_100)
+        self.assertNotIn(sc.IDLE, sc.FEEDBACK.values())
+
+
 class TestWireFormats(unittest.TestCase):
     def test_monitor_addresses(self):
         self.assertEqual(monitor.parse_addr(None), monitor.DEFAULT_ADDR)
