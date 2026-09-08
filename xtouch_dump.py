@@ -76,47 +76,50 @@ FADER_CC = {"A": 9, "B": 10}
 #   * The lit LAYER A / LAYER B button is the only indication of which layer
 #     is active. Nothing says so over MIDI.
 #
-# --- RX MIDI CONTROL, from Behringer's X-Touch Editor (firmware 1.08) ----
+# --- RX: what the device LISTENS on, measured 2026-09-08 ------------------
 #
-# The editor's GLOBAL tab states what the device LISTENS to, and it is not
-# the mirror of what it sends:
+# IT LISTENS WHERE IT SPEAKS. Lighting a button means sending the note that
+# button SENDS -- notes 8-23 for the sixteen buttons on layer A, top row
+# then bottom, left to right. Notes 0-7 and 24-31, the encoder-push numbers,
+# light nothing, which is right: a push has no lamp.
 #
-#     LED Ring Behavior   CC 1-8       (display mode, not a value)
+# Worth stating flatly because Behringer's own X-Touch Editor says
+# otherwise, and believing it cost a session. Its GLOBAL tab lists an
+# RX MIDI CONTROL map:
+#
+#     LED Ring Behavior   CC 1-8
 #     LED Ring Value      CC 9-16
 #     Button LEDs         NOTE 0-15
-#     Layer A select      Program Change 0
-#     Layer B select      Program Change 1
-#     Standard mode       CC 127 value 0
-#     MC mode             CC 127 value 1
+#     Layer A / B select  Program Change 0 / 1
+#     Standard / MC mode  CC 127 value 0 / 1
 #
-# Three things follow, and the first overturns an earlier conclusion here.
+# Tested against this unit, Standard mode, channel 10:
 #
-# 1. THE CONTROLLER CAN SET THE LAYER. Program Change 0 and 1 select layer A
-#    and B. The LED OUTPUT section below concludes that the layer can only
-#    be inferred from arriving notes; that is now only half true. The
-#    controller can drive the
-#    layer authoritatively, know it at startup, and never be in doubt. The
-#    device is silent when the user presses LAYER, so input inference is
-#    still needed to notice a MANUAL switch -- but the controller is no
-#    longer merely a passenger.
+#   * NOTE 0-15 lights nothing. Notes 8-23 light the buttons. The editor is
+#     numbering the buttons 0-15 as an index, not as MIDI notes.
+#   * PROGRAM CHANGE 0 and 1 do NOT switch the layer -- the lamp does not
+#     move. The controller cannot select the layer and is back to inferring
+#     it from arriving notes, exactly as the LED OUTPUT section below says.
+#   * CC 9-16 is not the ring value. CC 9 and 10 are the two FADERS and
+#     moved no ring at all.
 #
-# 2. LED NOTES ARE NOT INPUT NOTES. Buttons SEND notes 8-23 (layer A) but
-#    their LEDs LISTEN on notes 0-15. So the note that lights a button is
-#    not the note it sends, and a driver that reuses the input number for
-#    output will light the wrong button. UNVERIFIED which way round: note 8
-#    should be the ninth button, bottom row 1, rather than the top-left one
-#    the layers test claimed to light.
+# The likeliest explanation is that the editor describes MC mode, or a
+# firmware other than this one. Either way it is not a source for this
+# driver. Do not re-derive the map from it -- that is how the two measured
+# facts at the bottom of this comment came to be doubted for a day.
 #
-# 3. RINGS NEED TWO MESSAGES. A behaviour on CC 1-8 and a value on CC 9-16.
-#    Setting one CC alone -- which xtouch_leds.py rings originally did -- is
-#    not enough to make a ring show a value.
+# RINGS are only half measured. Sending 64 to CC 11-16 moved the rings of
+# encoders 1-6, one for one. CC 1-8 was set to 1 in the same pass, which is
+# a ring's MINIMUM and looks exactly like the resting state, so that block
+# is still untested at any value that would show. Two readings fit:
 #
-# The QSG (QSG_BE_0808AAF_XTOUCHMINI_WW.pdf) additionally states velocity 1
-# lights a button LED, velocity 2 BLINKS it, and velocity 3 is ignored. This
-# unit did none of that -- every velocity 1-127 lit steady, measured from
-# off. The likeliest explanation is finding 2: the test lit a button nobody
-# was watching. Re-test before believing either the manual or the earlier
-# measurement.
+#   a) a ring is addressed by its encoder's own transmit CC -- 1-8 on layer
+#      A, 11-18 on layer B. Consistent with the buttons, and it would mean
+#      the device was on layer B during that test.
+#   b) the ring block is CC 11-18 whichever layer is showing.
+#
+# They differ for the driver, so xtouch_leds.py rings now walks CC 1-8,
+# 11-18 and 21-28 at a visible value and asks which layer lamp is lit.
 #
 # LED OUTPUT, tested 2026-09-08 (xtouch_leds.py layers):
 #
@@ -124,7 +127,9 @@ FADER_CC = {"A": 9, "B": 10}
 #     is worth stating because it looks exactly like a dead LED protocol.
 #   * A note sent for the INACTIVE layer is DISCARDED, not stored. Sending
 #     note 32 while the device is on layer A lights nothing at the time, and
-#     nothing appears when you then switch to layer B.
+#     nothing appears when you then switch to layer B. This stands: note 32
+#     is layer B's first button, the correct address, so the test was aimed
+#     at something real.
 #
 # So the controller cannot paint blindly: to light a button it must send the
 # ACTIVE layer's note number, and the device never says which layer that is.
@@ -157,7 +162,8 @@ FADER_CC = {"A": 9, "B": 10}
 #
 # BUTTON LEDs are BINARY (xtouch_leds.py states 8, channel 10): velocity 0
 # is off and every value from 1 to 127 is plain on. No brightness steps and
-# no blink anywhere in the range.
+# no blink anywhere in the range. Note 8 is the top-left button -- confirmed
+# by the note walk, so this was measured on the right lamp.
 #
 # Measured twice. The first pass walked the velocities without resetting, so
 # it could not tell an IGNORED value from one meaning "on" -- the lamp was
@@ -194,26 +200,26 @@ FADER_CC = {"A": 9, "B": 10}
 
 # --- what the device LISTENS on -------------------------------------------
 #
-# From the editor, not measured. Deliberately separate from the TX ranges
-# above, because they are NOT the same numbers: a button sends 8-23 and
-# listens on 0-15. Anything driving LEDs must import these rather than reuse
-# the input map -- doing that lights the wrong control, silently.
-LED_NOTE = range(0, 16)                 # button LEDs
-RING_BEHAVIOUR_CC = range(1, 9)         # how a ring displays its value
-RING_VALUE_CC = range(9, 17)            # the value itself
-LAYER_PROGRAM = {"A": 0, "B": 1}        # program change selects the layer
-MODE_CC = 127                           # value 0 Standard, 1 MC
+# Measured, not read off the editor. The RX numbers are the TX numbers: to
+# light a button, send the note it sends. So these are aliases of the input
+# ranges rather than a second map, and they exist to say so at the point of
+# use -- the alternative is every LED call site quietly assuming it.
+LED_NOTE = {layer: range(BUTTONS_TOP[layer].start, BUTTONS_BOTTOM[layer].stop)
+            for layer in ("A", "B")}
 
-# Ring display modes, as the editor names them. Which number selects which
-# is UNVERIFIED -- xtouch_leds.py ring walks them.
-RING_MODES = ("single", "pan", "fan", "spread")
+# UNRESOLVED, see the ring note above. Candidate blocks for the ring value,
+# in the order xtouch_leds.py rings walks them: the layer A encoder CCs, the
+# layer B encoder CCs, and one block further on in case the pattern is
+# "transmit CC plus ten".
+RING_CC_CANDIDATES = (range(1, 9), range(11, 19), range(21, 29))
 
 
-def ring_ccs(index):
-    """(behaviour_cc, value_cc) for encoder 1-8. Two messages, never one."""
+def led_note(layer, row, index):
+    """Note that lights one button. row is 'top' or 'bottom', index 1-8."""
+    block = BUTTONS_TOP if row == "top" else BUTTONS_BOTTOM
     if not 1 <= index <= 8:
-        raise ValueError(f"encoder {index} is out of range 1-8")
-    return RING_BEHAVIOUR_CC[index - 1], RING_VALUE_CC[index - 1]
+        raise ValueError(f"button {index} is out of range 1-8")
+    return block[layer][index - 1]
 
 
 def name_for(kind, number):

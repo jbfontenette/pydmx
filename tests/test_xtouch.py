@@ -234,41 +234,67 @@ class TestLearnWalk(unittest.TestCase):
 
 
 class TestOutputMap(unittest.TestCase):
-    """The device does not listen where it speaks.
+    """The device listens where it speaks -- measured, against the manual.
 
-    Buttons SEND notes 8-23 and their LEDs LISTEN on 0-15; a ring is two
-    CCs, not one. Both facts were learned late, after a hardware session
-    spent testing an LED protocol through numbers that address nothing, so
-    they are pinned here rather than left in a comment.
+    Behringer's X-Touch Editor says button LEDs listen on notes 0-15, that
+    program change selects the layer, and that a ring takes a behaviour CC
+    and a value CC. All three were tested on the device and none is true of
+    this unit in Standard mode: notes 8-23 light the buttons, program change
+    moves nothing, and CC 9-10 are the faders. The editor was believed for
+    one commit and it put two correct measurements in doubt, so what the
+    hardware said is pinned here.
     """
 
-    def test_led_notes_are_not_the_notes_buttons_send(self):
-        # The trap: reuse the input number for output and the bottom row
-        # (notes 16-23) addresses nothing at all, while the top row lands on
-        # LED notes 8-15 -- valid numbers, so no error, just the wrong half
-        # of the surface lighting up.
-        sent = set(xtouch_dump.BUTTONS_TOP["A"]) | set(
-            xtouch_dump.BUTTONS_BOTTOM["A"])
-        self.assertEqual(len(sent), len(xtouch_dump.LED_NOTE))
-        self.assertFalse(sent <= set(xtouch_dump.LED_NOTE))
+    def test_an_led_note_is_the_note_the_button_sends(self):
+        for layer in ("A", "B"):
+            sends = set(xtouch_dump.BUTTONS_TOP[layer]) | set(
+                xtouch_dump.BUTTONS_BOTTOM[layer])
+            self.assertEqual(sends, set(xtouch_dump.LED_NOTE[layer]))
 
-    def test_a_ring_is_a_behaviour_and_a_value(self):
-        for index in range(1, 9):
-            behaviour, value = xtouch_dump.ring_ccs(index)
-            self.assertIn(behaviour, xtouch_dump.RING_BEHAVIOUR_CC)
-            self.assertIn(value, xtouch_dump.RING_VALUE_CC)
-            self.assertNotEqual(behaviour, value)
+    def test_the_two_layers_do_not_share_led_notes(self):
+        # Which is why a note for the inactive layer addresses something
+        # real and is nonetheless discarded, rather than lighting the wrong
+        # lamp on the layer that is showing.
+        self.assertFalse(set(xtouch_dump.LED_NOTE["A"]) &
+                         set(xtouch_dump.LED_NOTE["B"]))
 
-    def test_ring_ccs_refuses_a_number_that_is_not_an_encoder(self):
-        for index in (0, 9, 16, -1):
+    def test_led_note_names_a_button_by_row_and_position(self):
+        self.assertEqual(xtouch_dump.led_note("A", "top", 1), 8)
+        self.assertEqual(xtouch_dump.led_note("A", "bottom", 1), 16)
+        self.assertEqual(xtouch_dump.led_note("B", "top", 1), 32)
+        for index in (0, 9):
             with self.assertRaises(ValueError):
-                xtouch_dump.ring_ccs(index)
+                xtouch_dump.led_note("A", "top", index)
 
-    def test_the_ring_mode_takes_an_encoder_not_a_cc(self):
-        # 'ring 16' used to be accepted and sent a value to CC 16, which is
-        # another encoder's ring value. The range says what the number means.
+    def test_the_ring_block_is_still_a_question(self):
+        # Recorded as candidates, not as an answer. CC 11-16 moved rings
+        # 1-6; CC 1-8 was only ever set to 1, a ring's minimum, which is
+        # indistinguishable from its resting state -- so the layer A block
+        # has never really been tried and must not be written down as dead.
+        blocks = xtouch_dump.RING_CC_CANDIDATES
+        self.assertGreater(len(blocks), 1)
+        self.assertIn(11, blocks[1])
+        self.assertEqual(set(blocks[0]), set(xtouch_dump.ENCODER_CC["A"]))
+        self.assertEqual(set(blocks[1]), set(xtouch_dump.ENCODER_CC["B"]))
+
+    def test_the_faders_are_not_in_any_ring_block(self):
+        # The editor's "ring value CC 9-16" ran straight through both
+        # faders, which is how it was caught.
+        faders = set(xtouch_dump.FADER_CC.values())
+        for block in xtouch_dump.RING_CC_CANDIDATES:
+            self.assertFalse(faders & set(block))
+
+    def test_the_ring_mode_takes_a_cc_from_the_candidates(self):
         import xtouch_leds
-        self.assertEqual(xtouch_leds.TAKES_NUMBER["ring"][1:], (1, 8))
+        low, high = xtouch_leds.TAKES_NUMBER["ring"][1:]
+        self.assertEqual(low, xtouch_dump.RING_CC_CANDIDATES[0].start)
+        self.assertEqual(high, xtouch_dump.RING_CC_CANDIDATES[-1].stop - 1)
+
+    def test_the_states_mode_takes_a_button_led_note(self):
+        import xtouch_leds
+        low, high = xtouch_leds.TAKES_NUMBER["states"][1:]
+        self.assertEqual(low, xtouch_dump.LED_NOTE["A"].start)
+        self.assertEqual(high, xtouch_dump.LED_NOTE["B"].stop - 1)
 
 
 class TestOutputMessages(unittest.TestCase):
@@ -297,6 +323,13 @@ class TestOutputMessages(unittest.TestCase):
             function(out, *args)
         return out.sent
 
+    def test_everything_goes_to_the_mapped_channel(self):
+        import xtouch_leds
+        sent = self.run_with_stub(xtouch_leds.test_rings)
+        self.assertTrue(sent)
+        for message in sent:
+            self.assertEqual(message.channel, xtouch_dump.CHANNEL)
+
     def test_clear_leaves_the_mode_switch_alone(self):
         import xtouch_leds
         sent = self.run_with_stub(xtouch_leds.clear)
@@ -307,26 +340,31 @@ class TestOutputMessages(unittest.TestCase):
                           if m.type == "control_change" and m.control == 127])
         self.assertTrue([m for m in sent if m.type == "note_on"])
 
-    def test_selecting_a_layer_is_a_program_change(self):
+    def test_clear_puts_out_every_button_on_both_layers(self):
         import xtouch_leds
-        for layer, program in xtouch_dump.LAYER_PROGRAM.items():
-            sent = self.run_with_stub(xtouch_leds.select_layer, layer)
-            self.assertEqual(len(sent), 1)
-            self.assertEqual(sent[0].type, "program_change")
-            self.assertEqual(sent[0].program, program)
-            self.assertEqual(sent[0].channel, xtouch_dump.CHANNEL)
+        sent = self.run_with_stub(xtouch_leds.clear)
+        off = {m.note for m in sent if m.type == "note_on" and m.velocity == 0}
+        for layer in ("A", "B"):
+            self.assertTrue(set(xtouch_dump.LED_NOTE[layer]) <= off, layer)
 
-    def test_the_rings_probe_sends_both_messages(self):
-        # The original sent one CC and waited for a ring to show a value,
-        # which it never could. Every encoder must get a behaviour AND a
-        # value, or the mode cannot answer the question it asks.
+    def test_the_rings_probe_walks_every_candidate_block(self):
+        # One CC at a time, each set to a value that is visibly not the
+        # resting state. Setting a ring to 1 is what made the last run
+        # unreadable: minimum and resting look identical.
         import xtouch_leds
         sent = self.run_with_stub(xtouch_leds.test_rings)
-        controls = [m.control for m in sent if m.type == "control_change"]
-        for index in range(1, 9):
-            behaviour, value = xtouch_dump.ring_ccs(index)
-            self.assertIn(behaviour, controls)
-            self.assertIn(value, controls)
+        lit = {m.control for m in sent
+               if m.type == "control_change" and m.value > 1}
+        for block in xtouch_dump.RING_CC_CANDIDATES:
+            self.assertTrue(set(block) <= lit)
+
+    def test_the_scan_walk_covers_both_layers_of_buttons(self):
+        import xtouch_leds
+        sent = self.run_with_stub(xtouch_leds.test_scan)
+        lit = {m.note for m in sent
+               if m.type == "note_on" and m.velocity > 0}
+        for layer in ("A", "B"):
+            self.assertTrue(set(xtouch_dump.LED_NOTE[layer]) <= lit, layer)
 
 
 class TestProbeImports(unittest.TestCase):
