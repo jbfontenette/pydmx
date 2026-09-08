@@ -76,6 +76,47 @@ FADER_CC = {"A": 9, "B": 10}
 #   * The lit LAYER A / LAYER B button is the only indication of which layer
 #     is active. Nothing says so over MIDI.
 #
+# --- RX MIDI CONTROL, from Behringer's X-Touch Editor (firmware 1.08) ----
+#
+# The editor's GLOBAL tab states what the device LISTENS to, and it is not
+# the mirror of what it sends:
+#
+#     LED Ring Behavior   CC 1-8       (display mode, not a value)
+#     LED Ring Value      CC 9-16
+#     Button LEDs         NOTE 0-15
+#     Layer A select      Program Change 0
+#     Layer B select      Program Change 1
+#     Standard mode       CC 127 value 0
+#     MC mode             CC 127 value 1
+#
+# Three things follow, and the first overturns an earlier conclusion here.
+#
+# 1. THE CONTROLLER CAN SET THE LAYER. Program Change 0 and 1 select layer A
+#    and B. Everything above about inferring the layer from arriving notes
+#    and repainting on a guess is unnecessary: the controller can drive the
+#    layer authoritatively, know it at startup, and never be in doubt. The
+#    device is silent when the user presses LAYER, so input inference is
+#    still needed to notice a MANUAL switch -- but the controller is no
+#    longer merely a passenger.
+#
+# 2. LED NOTES ARE NOT INPUT NOTES. Buttons SEND notes 8-23 (layer A) but
+#    their LEDs LISTEN on notes 0-15. So the note that lights a button is
+#    not the note it sends, and a driver that reuses the input number for
+#    output will light the wrong button. UNVERIFIED which way round: note 8
+#    should be the ninth button, bottom row 1, rather than the top-left one
+#    the layers test claimed to light.
+#
+# 3. RINGS NEED TWO MESSAGES. A behaviour on CC 1-8 and a value on CC 9-16.
+#    Setting one CC alone -- which xtouch_leds.py rings originally did -- is
+#    not enough to make a ring show a value.
+#
+# The QSG (QSG_BE_0808AAF_XTOUCHMINI_WW.pdf) additionally states velocity 1
+# lights a button LED, velocity 2 BLINKS it, and velocity 3 is ignored. This
+# unit did none of that -- every velocity 1-127 lit steady, measured from
+# off. The likeliest explanation is finding 2: the test lit a button nobody
+# was watching. Re-test before believing either the manual or the earlier
+# measurement.
+#
 # LED OUTPUT, tested 2026-09-08 (xtouch_leds.py layers):
 #
 #   * Lighting a note works, on channel 10. Channel 0 lights nothing, which
