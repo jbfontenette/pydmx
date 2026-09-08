@@ -586,6 +586,7 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print,
     bindings = {}
     faders = {}
     unknown_scenes = []
+    coloured = []
     for line_no, row in _rows(path):
         try:
             note = parse_pad(row.get("pad", ""), surface)
@@ -714,8 +715,16 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print,
                  f"column blank.")
 
         import colours as colour_names
+        raw_colour = (row.get("colour") or "").strip()
+        if raw_colour and not surface.PADS:
+            # Collected, not warned per line: a layout written for a colour
+            # grid and moved to a device without one would otherwise print a
+            # line per row and bury everything else. Still worth saying --
+            # silently ignoring the column is how you spend an evening
+            # wondering why the colours never appear.
+            coloured.append(line_no)
         try:
-            colour = colour_names.resolve(row.get("colour") or "white")
+            colour = colour_names.resolve(raw_colour or "white")
         except ValueError as exc:
             raise ValueError(f"{path} line {line_no}: {exc}")
 
@@ -726,6 +735,12 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print,
             warn(f"{path} line {line_no}: {prefix}{where} bound twice "
                  f"('{bindings[key].target}' -> '{target}')")
         bindings[key] = Binding(note, layer, kind, target, mode, colour)
+
+    if coloured and warn:
+        warn(f"{path}: colour set on {len(coloured)} row(s) but the "
+             f"{surface.NAME} surface has no colour LEDs -- ignored. "
+             f"(lines {', '.join(str(n) for n in coloured[:8])}"
+             f"{', ...' if len(coloured) > 8 else ''})")
 
     if unknown_scenes and warn:
         lines = ", ".join(f"line {n} '{t}'" for n, t in unknown_scenes)

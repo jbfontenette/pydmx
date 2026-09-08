@@ -539,7 +539,8 @@ def main():
         if os2l_port is not None:
             sources.append("VirtualDJ")
         if tempo_pads:
-            sources.append(f"bpm fader f{tempo_pads[0]}")
+            where = vocab.describe_control(("fader", tempo_pads[0]))
+            sources.append(f"bpm fader {where}")
         if has_tap:
             sources.append("tap pad")
         print(f"beat-synced chasers: {', '.join(synced)}")
@@ -558,8 +559,12 @@ def main():
         for (control, layer), b in sorted(show.bindings.items()):
             where = vocab.describe_control(control)
             prefix = f"{vocab.LAYER_NAMES[layer]}+" if layer else ""
+            # Colour only where a lamp can show one. Printing 'white' next
+            # to every binding on a surface with binary LEDs suggests a
+            # setting that does nothing.
+            colour = f" {b.colour}" if vocab.PADS else ""
             print(f"  {prefix.upper():<{width}}{where:<8} {b.mode:<7} "
-                  f"{b.kind:<7} {b.target:<14} {b.colour}")
+                  f"{b.kind:<7} {b.target:<14}{colour}")
         print("\nCSVs parsed. No hardware touched.")
         return
 
