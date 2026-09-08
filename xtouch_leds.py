@@ -154,13 +154,35 @@ def test_scan_channels(out):
 
 
 def test_states(out, number):
-    """Velocity is where the APC hides its behaviour. Find out here."""
-    print(f"Walking velocities on note {number}. Watch for off, steady,")
-    print("blink, or anything else it does.\n")
-    for velocity in (0, 1, 2, 3, 4, 5, 15, 63, 64, 127):
+    """What each Note On velocity does to a button LED.
+
+    Every value is measured from OFF, which the first version did not do --
+    it walked the velocities in sequence, so once one of them latched the LED
+    on, every later reading said "on" whether that velocity did anything or
+    not. Published notes for this device say velocities above 2 are IGNORED,
+    which is exactly the case that mistake cannot see: an ignored value
+    leaves the LED however the previous one left it.
+
+    So: off, then the value, then look. Three distinct answers are possible
+    and they mean different things --
+
+        stays off   the velocity is ignored
+        comes on    steady
+        blinks      watch for a few seconds; a slow blink read as "on" is
+                    the other way this test goes wrong
+    """
+    print(f"Note {number}. Each velocity is set from OFF, so what you see is")
+    print("what THAT value does -- not what an earlier one left behind.\n")
+    print("Answer each with: off (ignored), on, or blink.")
+    print("Give it a couple of seconds before deciding -- a slow blink looks")
+    print("like plain 'on' if you only glance.\n")
+    for velocity in (1, 2, 3, 4, 5, 6, 15, 63, 64, 127):
+        note(out, number, 0)
+        time.sleep(0.25)
         note(out, number, velocity)
-        print(f"  velocity {velocity:<3}")
-        wait(f"velocity {velocity} -- Enter for next")
+        print(f"  velocity {velocity:<3}  off -> {velocity}")
+        wait(f"velocity {velocity}: off / on / blink? -- Enter for next",
+             seconds=3.0)
     note(out, number, 0)
 
 
