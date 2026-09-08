@@ -91,9 +91,9 @@ already does for `apc` versus `virtualapc`. Extending that to four choices —
 architecture change. Two devices at once would mean merging event sources and
 keeping LED state per device, which is a different and much larger job.
 
-**The standalone probe is finished**, on branch `claude/xtouch-probe`:
-`xtouch_dump.py` for input, `xtouch_leds.py` for output, mirroring
-`apc_dump.py` and `apc_leds.py` and depending on nothing in the project.
+**The standalone probe is finished** and on `main`: `xtouch_dump.py` for
+input and `xtouch_leds.py` for output, mirroring `apc_dump.py` and
+`apc_leds.py` and depending on nothing else in the project.
 Every control was walked on the hardware, both layers, and the map below is
 measured rather than read off a specification. It lives in `xtouch_dump.py`'s
 header, the way `apc.py` carries the APC's.
@@ -358,24 +358,25 @@ Deciding the shape up front is what stops that bill being paid six times over.
 
 ---
 
-## Note on the unmerged branches
+## What is already on main
 
-`main` is what ran a six-hour show, and three branches sit off it unmerged by
-deliberate choice.
+Everything the show has run on, plus three branches merged once the X-Touch
+probe was finished. Nothing in this file is blocked on unmerged work.
 
-**`claude/watcher-thread-race-hhbp9x`** carries the `REVIEW.md` fixes. One of
-them matters to this roadmap: it consolidates the surface constant tables —
-currently duplicated across `apc.py`, `virtualapc.py` and `apc_leds.py` — into
-a single `surface_constants.py`. The X-Touch driver would otherwise add a
-fourth copy. Worth merging before the device work starts, or repeating the
-consolidation as part of it. That duplication is not hypothetical: the
-X-Touch LED probe wrote the MIDI channel down a second time, as 0 instead of
-10, and a whole hardware session was spent testing an LED protocol that was
-working fine.
+- **The `REVIEW.md` cleanup.** Every open item closed or recorded as
+  deliberately left. One of them matters to the work below:
+  `surface_constants.py` now holds the APC constant tables that were
+  duplicated across `apc.py`, `virtualapc.py` and `apc_leds.py`, so the
+  X-Touch driver does not add a fourth copy. That duplication is not a
+  hypothetical risk — the X-Touch LED probe wrote the MIDI channel down a
+  second time, as 0 instead of 10, and a whole hardware session was spent
+  testing an LED protocol that was working fine.
+- **The X-Touch probe.** `xtouch_dump.py` and `xtouch_leds.py` with their
+  tests: the measured control map that section **3** rests on. Standalone,
+  the way `apc_dump.py` and `apc_leds.py` were before `apc.py` existed.
+- **This file.**
 
-**`claude/xtouch-probe`** carries `xtouch_dump.py`, `xtouch_leds.py` and their
-tests — the measured control map that section **3** rests on. It touches
-nothing else in the project, so it is safe to merge on its own whenever the
-driver work starts.
-
-**`claude/roadmap-analysis`** is this file.
+`main` is also what ran the six-hour show, and stays the branch to be careful
+with. The habit that produced these merges is worth keeping: build each
+subsystem standalone, prove it on the hardware, and merge it only once its
+findings are written down.
