@@ -105,9 +105,13 @@ FADER_CC = {"A": 9, "B": 10}
 #     controller sending anything. For pan/tilt that native display is
 #     exactly what is wanted.
 #
-# Not yet confirmed: which physical control is number 1 within each block.
-# The ranges above come from pressing them in order, which is strong but is
-# not the same as labelling each one. --learn is what settles it.
+# CONFIRMED control by control with --learn on 2026-09-08. Every inference
+# above held: the row nearer the encoders is notes 8-15, both rows and the
+# encoders run left to right, encoder N is CC N, and the fader irregularity
+# is real. 33 of 33 controls send different numbers on layer B; the 34th,
+# the layer button, sends nothing at all and so does not appear.
+#
+# Nothing about the INPUT side is inferred any more.
 
 
 def name_for(kind, number):
