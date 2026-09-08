@@ -112,6 +112,23 @@ FADER_CC = {"A": 9, "B": 10}
 # the layer button, sends nothing at all and so does not appear.
 #
 # Nothing about the INPUT side is inferred any more.
+#
+# BUTTON LEDs are BINARY (xtouch_leds.py states 8, channel 10): velocity 0
+# is off and every value from 1 to 127 is plain on. No brightness steps, no
+# blink at velocity 2, nothing else hiding in the range.
+#
+# That costs something the APC provides. On the APC an idle-but-BOUND pad
+# glows at 25% so you can see where your bindings live before pressing
+# anything, and --feedback offers pulse and blink for active ones. Here a
+# bound-but-inactive button looks exactly like an unbound one, so the whole
+# idle/active brightness scheme has no equivalent and the FEEDBACK table
+# collapses to on/off. Worth knowing when laying a show out on this surface:
+# the buttons cannot show you where anything is.
+#
+# Untested: whether another MIDI CHANNEL carries blink, the way the APC puts
+# behaviour in the channel and colour in the velocity. Channel 0 lights
+# nothing at all, channel 10 lights steady; the other fourteen are unknown.
+# xtouch_leds.py scan-channels walks them.
 
 
 def name_for(kind, number):
