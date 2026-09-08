@@ -346,25 +346,62 @@ def checklist():
     return items
 
 
+def collect_until_enter(port, prompt):
+    """Show what arrives while waiting for Enter, then hand it back.
+
+    The first version simply blocked on input() and drained the port
+    afterwards. That works -- the port buffers while the prompt waits -- but
+    it looks broken: you press a button, nothing prints, and there is no way
+    to tell whether the tool heard you or whether the whole thing is dead.
+    Someone at a bench should not have to take that on faith.
+
+    So poll stdin alongside the port and echo each message as it lands.
+    Falls back to plain input() where stdin cannot be polled, which keeps
+    the old behaviour rather than failing.
+    """
+    try:
+        import select
+        select.select([sys.stdin], [], [], 0)
+    except Exception:
+        input(prompt)
+        return list(port.iter_pending())
+
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    seen = []
+    while True:
+        ready, _, _ = select.select([sys.stdin], [], [], 0.05)
+        for msg in port.iter_pending():
+            seen.append(msg)
+            print(f"\n    heard  {describe(msg)}")
+            sys.stdout.write(prompt)
+            sys.stdout.flush()
+        if ready:
+            if sys.stdin.readline() == "":
+                raise EOFError
+            return seen
+
+
 def learn_layer(port, label):
     """Prompt through every control, reading what each one sends.
 
-    Messages arrive while the prompt is blocked on input(), and the port
-    buffers them -- so pressing the control and THEN hitting Enter is what
-    makes this work without threads.
+    Messages arrive while the prompt waits and the port buffers them, so
+    pressing the control and THEN confirming is what makes this work without
+    threads. collect_until_enter echoes them as they land so the waiting
+    does not look like nothing happening.
     """
     found = {}
     print(f"\n=== layer {label} ===")
-    print("Press or move each control, then hit Enter.")
+    print("Press or move each control -- what it sends is echoed as it")
+    print("arrives -- then hit Enter to move on.")
     print("Blank Enter with nothing touched = skip. Ctrl-C = stop early.\n")
 
     for item in checklist():
         try:
-            input(f"  {item:<20} > ")
+            messages = collect_until_enter(port, f"  {item:<20} > ")
         except (EOFError, KeyboardInterrupt):
             print("\n  (stopped early)")
             break
-        messages = list(port.iter_pending())
         if not messages:
             continue
         first = messages[0]

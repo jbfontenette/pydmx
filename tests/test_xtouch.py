@@ -178,6 +178,17 @@ class TestLearnWalk(unittest.TestCase):
             return iter(batch)
 
     @staticmethod
+    def _one_batch(port, prompt):
+        """Stands in for collect_until_enter: one prompt, one drained batch.
+
+        Patched rather than driven through stdin because the real function
+        polls sys.stdin with select, which is not something a test should be
+        pretending to be. What these tests are for is what learn_layer does
+        with the batch it gets back.
+        """
+        return list(port.iter_pending())
+
+    @staticmethod
     def note(number, channel=0):
         return types.SimpleNamespace(type="note_on", note=number,
                                      velocity=127, channel=channel)
@@ -189,7 +200,8 @@ class TestLearnWalk(unittest.TestCase):
 
     def walk(self, batches):
         port = self.StubPort(batches)
-        with mock.patch("builtins.input", lambda *a: ""), \
+        with mock.patch.object(xtouch_dump, "collect_until_enter",
+                               self._one_batch), \
                 contextlib.redirect_stdout(io.StringIO()):
             return xtouch_dump.learn_layer(port, "A")
 
