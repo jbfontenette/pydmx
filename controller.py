@@ -682,17 +682,26 @@ def main():
             for success, blinking for failure. Failure also holds four times
             longer, because a missed success costs nothing and a missed
             failure means playing a set on stale scenes.
+
+            Some controls cannot light at all -- the X-Touch's encoder
+            pushes have no lamp, and that is exactly where a one-shot action
+            like reload belongs on that surface. Then there is nothing to
+            flash, and the flash hold is not taken either: suppressing the
+            LED refresh for two and a half seconds to display nothing would
+            freeze the surface for no reason.
             """
             if not surface:
                 return
-            apc_mod = surface_module()
+            mod = surface_module()
             import colours
             ok = colour_name == "green"
-            if note in apc_mod.GRID:
+            if note in mod.PADS:
                 surface.pad(note, colours.palette(colour_name),
-                            apc_mod.SOLID_100)
-            else:
+                            mod.FEEDBACK["intensity"])
+            elif note in mod.BUTTONS:
                 surface.button(note, 1 if ok else 2)
+            else:
+                return
             state["flash_until"] = time.monotonic() + (0.7 if ok else 2.5)
 
         def do_reload(note=None):

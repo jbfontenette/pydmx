@@ -382,6 +382,57 @@ class TestXTouchPainting(unittest.TestCase):
         self.assertIsNone(device.introduce())
 
 
+class TestAPCPolling(unittest.TestCase):
+    """SHIFT becomes a layer event before it reaches the controller.
+
+    This is the path that ran a six-hour show, so the behaviour must be
+    identical -- only the shape of the event changed. handle() no longer has
+    a SHIFT branch, so if the surface stopped translating, the modifier would
+    arrive as an ordinary press of note 122 and read as an unbound pad.
+    """
+
+    def poll_real(self, *incoming):
+        import apc
+        device = apc.APC.__new__(apc.APC)
+        device.inp = StubPort(incoming)
+        return device.poll()
+
+    def poll_sim(self, *payloads):
+        import virtualapc
+        device = virtualapc.VirtualAPC.__new__(virtualapc.VirtualAPC)
+        device.link = types.SimpleNamespace(drain=lambda: list(payloads))
+        device._led = {}
+        device._pending_faders = None
+        return device.poll()
+
+    def test_shift_is_a_layer_change_not_a_press(self):
+        self.assertEqual(self.poll_real(note_on(surface_constants.SHIFT)),
+                         [("layer", 1)])
+        self.assertEqual(self.poll_real(note_off(surface_constants.SHIFT)),
+                         [("layer", 0)])
+
+    def test_ordinary_pads_are_untouched(self):
+        self.assertEqual(self.poll_real(note_on(0), note_off(0)),
+                         [("press", 0), ("release", 0)])
+
+    def test_faders_keep_their_numbering(self):
+        self.assertEqual(self.poll_real(control_change(0x30, 64)),
+                         [("fader", 1, 64)])
+        self.assertEqual(self.poll_real(control_change(0x38, 64)),
+                         [("fader", 9, 64)])
+
+    def test_the_simulator_translates_it_the_same_way(self):
+        import simlink
+        self.assertEqual(
+            self.poll_sim(bytes([simlink.PRESS, surface_constants.SHIFT])),
+            [("layer", 1)])
+        self.assertEqual(
+            self.poll_sim(bytes([simlink.RELEASE, surface_constants.SHIFT])),
+            [("layer", 0)])
+        self.assertEqual(self.poll_sim(bytes([simlink.PRESS, 5])),
+                         [("press", 5)])
+
+
 class TestLayerColumn(unittest.TestCase):
     """'shift' and 'layer' are two spellings of one idea."""
 

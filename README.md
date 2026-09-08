@@ -1,8 +1,8 @@
 # pydmx — a CSV-driven DMX lighting controller
 
 A small lighting desk for macOS. Scenes and chasers are plain CSV files, an
-Akai APC mini mk2 is the control surface, and chasers can lock to the beat of
-whatever Virtual DJ is playing.
+Akai APC mini mk2 or a Behringer X-Touch Mini is the control surface, and
+chasers can lock to the beat of whatever Virtual DJ is playing.
 
 Everything runs without hardware, so a show can be built and tested on a
 laptop on a train: an on-screen APC, a DMX channel monitor, and a dry-run
@@ -55,8 +55,9 @@ python3 dmxmon.py                                # live DMX channel view
 **With hardware:**
 
 ```bash
-python3 controller.py --check    # validate the CSVs, touch nothing
-python3 controller.py            # go
+python3 controller.py --check              # validate the CSVs, touch nothing
+python3 controller.py                      # go, on the APC
+python3 controller.py --surface xtouch     # go, on the X-Touch Mini
 ```
 
 ---
@@ -181,9 +182,11 @@ f1,level,wash*.dimmer
 f2,scale,wash*.dimmer
 ```
 
-**`pad`** — `r0c0` grid (row 0 is the **bottom** row, note = row×8+col),
+**`pad`** — the control, in the vocabulary of the surface you are running.
+On the APC: `r0c0` grid (row 0 is the **bottom** row, note = row×8+col),
 `t1`–`t8` track buttons, `s1`–`s8` scene launch (s1 is the top one),
-`f1`–`f9` faders, or a raw note number.
+`f1`–`f9` faders, or a raw note number. The X-Touch's own vocabulary is
+[below](#the-x-touch-mini).
 
 **`type`**
 
@@ -220,11 +223,63 @@ there warns.
 `warm_white`, `white`, `cold_white`, `uv`) or a raw palette index 0–127.
 Faders have no LEDs, so leave it blank there.
 
-**`shift`** — `yes` binds to the SHIFT layer, giving a second full 64-pad
-layer. Unshifted bindings show through where the shift layer has nothing.
+**`shift`** / **`layer`** — two spellings of one idea, and a row may use
+either, never both. `shift: yes` binds to the SHIFT layer, giving a second
+full 64-pad layer; `layer` is the general spelling and takes the layer's name
+(`shift` on the APC, `a` or `b` on the X-Touch). Base-layer bindings show
+through where the second layer has nothing, so a master fader bound once
+stays the master on both.
 
 **Level and scale faders** take `fixture-glob.feature` as their target, e.g.
 `wash*.dimmer`. Both are refused on snap features.
+
+### The X-Touch Mini
+
+`--surface xtouch` drives a Behringer X-Touch Mini instead of the APC. One
+surface at a time: `--surface apc` (the default), `apcsim` (what `--sim`
+selects) or `xtouch`.
+
+Each surface reads its **own mapping file**, because 64 pads do not fit on 16
+buttons and the two vocabularies do not overlap. The APC reads
+`mapping-apc.csv` or `mapping.csv`; the X-Touch reads `mapping-xtouch.csv`
+only — there is no falling back to an APC layout, which would be a file of
+unparseable tokens. See `show/mapping-xtouch.csv` for a worked example.
+
+| `pad` | control |
+|---|---|
+| `bt1`–`bt8` | buttons, top row, left to right |
+| `bb1`–`bb8` | buttons, bottom row |
+| `b1`–`b16` | the same sixteen, numbered top row then bottom |
+| `p1`–`p8` | the encoder push switches |
+| `e1`–`e8` | the encoders, as continuous controls |
+| `f1` | the fader (also spelled `f9`, so `master` reads as it does on the APC) |
+
+The `layer` column takes `a` or `b`. **The device switches layers itself** —
+the LAYER button sends no MIDI at all — so the controller works out which
+layer is showing from the numbers arriving. Three consequences worth knowing
+before you lay a show out:
+
+- **The surface stays dark until you press something.** The device never says
+  which layer it is showing and cannot be asked, so at startup the controller
+  does not know. Lighting the wrong layer would be worse; one press fixes it.
+- **A bound button looks exactly like an unbound one.** These lamps are
+  binary — no brightness steps, no blink — so the APC's dim-when-bound,
+  bright-when-active scheme has no equivalent. The buttons show what is
+  **active** instead, which is the half worth having mid-set. `colour` means
+  nothing here and warns if set.
+- **Encoders are absolute**, so they behave exactly like faders and take the
+  same types. Each layer keeps its own position, so `e1` on layer `a` and
+  `e1` on layer `b` are two independent controls.
+
+An encoder bound to `master`, `level` or `scale` shows its value on its LED
+ring, so a reload or a layer switch leaves the ring telling the truth rather
+than showing wherever the knob was last turned. **How** the ring draws that
+value — a travelling dot, a fill from one end — is set per encoder per layer
+in Behringer's X-Touch Editor and cannot be changed over MIDI.
+
+> The device must be in **Standard mode**, not MC MODE. MC MODE changes every
+> number on the device and makes the encoders send relative deltas instead of
+> positions.
 
 ---
 
@@ -266,8 +321,14 @@ else. They are the right first thing to run on a new adapter or a new cable:
 if a fixture responds to them, the hardware is good and any later problem is
 in the show files.
 
-Controller flags: `--check`, `--sim`, `--no-dmx`, `--no-midi`, `--monitor`,
-`--os2l [port]`, `--watch`, `--beats`, `--feedback <style>`.
+Controller flags: `--check`, `--surface <name>`, `--sim`, `--no-dmx`,
+`--no-midi`, `--monitor`, `--os2l [port]`, `--watch`, `--beats`,
+`--feedback <style>`.
+
+`--surface` picks the control surface: `apc` (default), `apcsim` (what
+`--sim` selects) or `xtouch`. It is never guessed from what happens to be
+plugged in — the wrong surface loads the wrong mapping file and binds
+nothing, which looks exactly like broken MIDI.
 
 `--watch` auto-reloads when the show files change. The watcher thread only
 notices the change; the main loop does the reload, on the same code path as

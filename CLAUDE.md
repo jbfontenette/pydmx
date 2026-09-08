@@ -15,7 +15,7 @@ against the code that exists, and which invariants it puts at risk.
 ## Before you start
 
 ```bash
-python3 -m unittest discover -s tests -t tests      # 146 tests, ~0.6s
+python3 -m unittest discover -s tests -t tests      # 227 tests, ~0.7s
 python3 controller.py --check                        # validate CSVs
 ```
 
@@ -30,6 +30,12 @@ python3 controller.py --sim --no-dmx --monitor
 python3 apcsim.py
 python3 dmxmon.py
 ```
+
+`--surface apc|apcsim|xtouch` picks the control surface. A surface is a
+module carrying a fixed set of names -- `PADS`, `BUTTONS`, `RINGS`,
+`LAYER_AT_START`, `parse_control` and the rest -- and a `poll()` emitting
+four event shapes. `tests/test_surface.py` lists the whole contract, so
+adding a third device starts from a failing test rather than a surprise.
 
 ## Invariants — do not break these
 
@@ -83,9 +89,20 @@ and only swaps them in if all files parsed. A typo mid-set must leave the
 running show untouched. Anything added to the show files must be parsed
 inside `_parse()`, never assigned directly.
 
-**10. Fail safe on unknown state.** When the APC does not report its fader
-positions, master starts at **0**, not 255. An unexpected blackout costs one
-gesture; an unexpected full blast in a venue does not.
+**10. Fail safe on unknown state.** When the surface does not report its
+fader positions, master starts at **0**, not 255. An unexpected blackout
+costs one gesture; an unexpected full blast in a venue does not. The same
+rule covers the X-Touch's layer: it never says which one it is showing, so
+nothing is painted until the first press says where we are -- lighting the
+layer that happens not to be in front of you is worse than a dark surface
+for one gesture.
+
+**11. A control id is layer-independent; the binding key is
+`(control, layer)`.** Which physical numbers a layer uses is the surface's
+business alone. The X-Touch sends different notes and CCs per layer and its
+driver translates both ways, so `mapping-xtouch.csv` never mentions a layer B
+number and moving a binding between layers is a one-column edit. Anything in
+`controller.py` that learns a raw MIDI number has broken this.
 
 ## Error policy
 
@@ -119,6 +136,18 @@ without re-testing on hardware will regress things that took a while to find.
   state change floods the output queue and freezes pads. `APC._led` diffs
   against the last sent state; `refresh()` drops the cache when the two might
   have diverged.
+- The X-Touch Mini listens where it speaks, per layer: to light a button you
+  send the note that button sends on the layer showing, and the other
+  layer's numbers are discarded as they arrive rather than queued. Its layer
+  button sends nothing at all, and program change does not switch it, so the
+  layer can only be inferred from arriving numbers. Behringer's X-Touch
+  Editor documents a different RX map -- LEDs on notes 0-15, program change
+  for the layer, separate behaviour and value CCs per ring -- and **none of
+  it is true of this unit in Standard mode**. All three were tested.
+- The X-Touch's button LEDs are binary: velocity 0 off, every value 1-127
+  plain on, measured from off each time. No brightness, no blink. Its
+  encoders are absolute *because* it is in Standard mode; MC MODE makes them
+  relative and moves every number.
 - The OS2L spec defines its messages but **not how they are delimited** on
   the stream. `os2l._Stream` decodes by object boundary. Do not switch to
   splitting on newlines.
@@ -136,7 +165,14 @@ without re-testing on hardware will regress things that took a while to find.
   odd-looking code here is odd for a reason discovered by testing.
 - Prefer failing loudly at load time over failing silently at showtime.
 - New CSV columns need: parsing in `showfile.py`, a warning when set on a
-  type that ignores them, documentation in `README.md`, and a test.
+  type that ignores them, documentation in `README.md`, and a test. "Type"
+  now includes the surface: `colour` on a device with no colour LEDs is the
+  same mistake as `mode` on a fader, and warns the same way.
+- Surface constants live in `surface_constants.py` and `xtouch_constants.py`,
+  one copy each, and the drivers re-export them. They were duplicated twice
+  before -- the APC's idle brightness drifted across three files, and the
+  X-Touch's MIDI channel was written down as 0 in a second place and cost a
+  whole hardware session testing an LED protocol that was working fine.
 - Keep hardware modules free of "pretend" branches. `NullSender` and
   `VirtualAPC` are separate classes precisely so the real ones stay simple.
 
