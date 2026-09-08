@@ -90,6 +90,51 @@ class TestEncoderClassification(unittest.TestCase):
             self.assertGreater(len(detail), 20, values)
 
 
+class TestControlMap(unittest.TestCase):
+    """The map measured off the device on 2026-09-08.
+
+    Pinned because one part of it is counter-intuitive and was got wrong on
+    the first pass: the notes offset cleanly by +24 between layers, but the
+    CCs do NOT. The two faders sit adjacent at 9 and 10 with an encoder block
+    either side, so the tidy "+9 for everything" guess put the layer B fader
+    on CC 18 -- and the device says 10.
+    """
+
+    def test_notes_offset_by_24_between_layers(self):
+        for number in range(24):
+            a = xtouch_dump.name_for("note", number)
+            b = xtouch_dump.name_for("note", number + 24)
+            self.assertIsNotNone(a, number)
+            self.assertEqual(a[0], b[0], number)      # same control
+            self.assertEqual((a[1], b[1]), ("A", "B"), number)
+
+    def test_the_faders_are_adjacent_not_offset(self):
+        self.assertEqual(xtouch_dump.name_for("cc", 9), ("fader", "A"))
+        self.assertEqual(xtouch_dump.name_for("cc", 10), ("fader", "B"))
+        # CC 18 is the last layer B ENCODER, not the fader the offset
+        # pattern would predict.
+        self.assertEqual(xtouch_dump.name_for("cc", 18), ("encoder 8", "B"))
+
+    def test_encoder_blocks_sit_either_side_of_the_faders(self):
+        self.assertEqual(xtouch_dump.name_for("cc", 1), ("encoder 1", "A"))
+        self.assertEqual(xtouch_dump.name_for("cc", 8), ("encoder 8", "A"))
+        self.assertEqual(xtouch_dump.name_for("cc", 11), ("encoder 1", "B"))
+
+    def test_the_three_note_blocks(self):
+        self.assertEqual(xtouch_dump.name_for("note", 0),
+                         ("encoder 1 push", "A"))
+        self.assertEqual(xtouch_dump.name_for("note", 8), ("button top 1", "A"))
+        self.assertEqual(xtouch_dump.name_for("note", 16),
+                         ("button bottom 1", "A"))
+        self.assertEqual(xtouch_dump.name_for("note", 47),
+                         ("button bottom 8", "B"))
+
+    def test_unknown_numbers_are_admitted_not_guessed(self):
+        self.assertIsNone(xtouch_dump.name_for("note", 48))
+        self.assertIsNone(xtouch_dump.name_for("cc", 0))
+        self.assertIsNone(xtouch_dump.name_for("cc", 19))
+
+
 class TestLearnWalk(unittest.TestCase):
     """The buffer-then-drain trick at the heart of --learn.
 

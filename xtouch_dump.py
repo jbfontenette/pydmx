@@ -38,6 +38,63 @@ import time
 # mido is imported inside the functions that need it, so the classifier below
 # can be imported and tested with nothing installed.
 
+# --- control map, confirmed against hardware 2026-09-08 --------------------
+#
+# Every control on both layers sends on MIDI channel 10 (mido numbering).
+# The layer button itself sends NOTHING: the device switches layers
+# internally and simply starts sending the other set of numbers, so the
+# controller never needs a page state machine for it.
+#
+# Notes are a clean +24 between layers. THE CCs ARE NOT. The two faders sit
+# adjacent in the middle, with an encoder block on either side:
+#
+#     CC  1-8   encoders, layer A
+#     CC  9     fader,    layer A
+#     CC 10     fader,    layer B      <-- not 18, which +9 would predict
+#     CC 11-18  encoders, layer B
+#
+# That irregularity was measured, not assumed -- the tidy offset guess put
+# the layer B fader on CC 18 and was wrong. Anyone extending this should
+# check against the device rather than continue the pattern.
+CHANNEL = 10
+
+ENCODER_PUSH = {"A": range(0, 8), "B": range(24, 32)}
+BUTTONS_TOP = {"A": range(8, 16), "B": range(32, 40)}
+BUTTONS_BOTTOM = {"A": range(16, 24), "B": range(40, 48)}
+ENCODER_CC = {"A": range(1, 9), "B": range(11, 19)}
+FADER_CC = {"A": 9, "B": 10}
+
+# Not yet confirmed: which physical control is number 1 within each block.
+# The ranges above come from pressing them in order, which is strong but is
+# not the same as labelling each one. --learn is what settles it.
+
+
+def name_for(kind, number):
+    """Label a note or CC, or None if it is not a control we know.
+
+    Returns e.g. ("encoder 3 push", "A") so the raw log can say what was
+    touched and which layer it came from -- the layer is implied by the
+    number, since the device never announces the switch.
+    """
+    for layer in ("A", "B"):
+        if kind == "note":
+            if number in ENCODER_PUSH[layer]:
+                n = number - ENCODER_PUSH[layer].start + 1
+                return f"encoder {n} push", layer
+            if number in BUTTONS_TOP[layer]:
+                n = number - BUTTONS_TOP[layer].start + 1
+                return f"button top {n}", layer
+            if number in BUTTONS_BOTTOM[layer]:
+                n = number - BUTTONS_BOTTOM[layer].start + 1
+                return f"button bottom {n}", layer
+        elif kind == "cc":
+            if number == FADER_CC[layer]:
+                return "fader", layer
+            if number in ENCODER_CC[layer]:
+                n = number - ENCODER_CC[layer].start + 1
+                return f"encoder {n}", layer
+    return None
+
 
 def _ports(direction):
     """Port names, or a plain message when the MIDI backend is missing.
@@ -80,16 +137,23 @@ def find_port():
     sys.exit("Pass one as an argument.")
 
 
+def _label(kind, number):
+    known = name_for(kind, number)
+    return f"{known[0]} [{known[1]}]" if known else "?"
+
+
 def describe(msg):
-    """Raw decode. No control names -- that is what we are here to learn."""
+    """Decode a message, naming the control where the map knows it."""
     if msg.type in ("note_on", "note_off"):
         action = ("press" if msg.type == "note_on" and msg.velocity > 0
                   else "release")
         return (f"NOTE {msg.note:<3} {action:<8} "
-                f"vel={msg.velocity:<3} ch={msg.channel}")
+                f"vel={msg.velocity:<3} ch={msg.channel}  "
+                f"{_label('note', msg.note)}")
     if msg.type == "control_change":
         return (f"CC   {msg.control:<3} {'':8} "
-                f"val={msg.value:<3} ch={msg.channel}")
+                f"val={msg.value:<3} ch={msg.channel}  "
+                f"{_label('cc', msg.control)}")
     if msg.type == "pitchwheel":
         return f"PITCH    {msg.pitch:>6}      ch={msg.channel}"
     if msg.type == "sysex":
