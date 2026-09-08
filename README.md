@@ -304,6 +304,7 @@ virtualapc.py     drop-in stand-in for apc.py, talks to apcsim
 show/             the CSV show definition
 tests/            unittest suite, hardware-free
 REVIEW.md         known bugs and improvements, ordered by risk
+ROADMAP.md        planned features, costed against the current code
 ```
 
 ## Project files
@@ -314,6 +315,8 @@ REVIEW.md         known bugs and improvements, ordered by risk
   LLM) working on the code.
 - `TODO.md` — deferred validation, notably the full-load test with every
   fixture and Virtual DJ running together.
+- `ROADMAP.md` — the features not built yet, each costed against the
+  code that exists, with the hardware claims marked unverified.
 
 ## Known quirks
 

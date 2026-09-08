@@ -8,7 +8,9 @@ A DMX lighting controller for live use. "Live use" is the whole design
 constraint: a crash mid-set means a dark venue, and a subtly wrong colour
 means a bad show. Failure modes matter more than features here.
 
-Read `README.md` for the CSV formats and `REVIEW.md` for known bugs.
+Read `README.md` for the CSV formats, `REVIEW.md` for known bugs, and
+`ROADMAP.md` for work not started -- what each planned feature costs
+against the code that exists, and which invariants it puts at risk.
 
 ## Before you start
 
