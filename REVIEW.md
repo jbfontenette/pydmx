@@ -121,12 +121,16 @@ unambiguous claim on it, and a master that moves on its own during a reload
 is the surprise item 10 of the invariants list exists to prevent. It keeps
 its value until a fader is moved.
 
-### 5. `NullSender.send()` sleeps 22.6ms while holding nothing back
-`run_until` in NullSender never calls `send()` (correct), but
-`play_scene.py` and any code calling `send()` directly on a NullSender
-blocks the caller for a frame time for no reason. Harmless today; a trap
-for the next tool that calls `sender.send()` in a loop expecting it to be
-cheap. A `pass` with a comment would do.
+### 5. `NullSender.send()` sleeps 22.6ms while holding nothing back  (FIXED)
+`run_until` never calls it (correct), but any tool driving the sender by
+hand was blocked for a frame time for nothing. Now a `pass` with a comment
+saying why: there is no wire to keep clear, and a caller that wants a
+realistic frame rate should sleep for it visibly.
+
+One correction to the original note: `play_scene.py` was named as a caller
+and is not one — it only uses `apply()` and `run_until`. The only direct
+`send()` callers are in `dmx_cycle.py`, against a real adapter, which is
+why nothing depended on the pacing.
 
 ### 6. `Show.reload()` mutates in place; readers see mixed generations  (MOOT)
 `reload()` is atomic with respect to *parse failure* (good) but not with
@@ -141,15 +145,27 @@ by adding locks around each field instead.
 
 ## B. Robustness gaps (won't crash, will confuse)
 
-### 7. `introduce()` failure path sets master to 0 even in `--sim`
-If apcsim.py isn't running yet when the controller starts, `introduce()`
-times out and master goes to 0 — then the simulator's HELLO resync repaints
-LEDs but **does not replay fader positions**, so the rig stays dark until
-a fader is moved in the simulator. The HELLO handler could re-trigger the
-enquiry (`self.link.send(ENQUIRE)`) or apcsim could volunteer an INTRO on
-connect. Minor, but it's the first thing a new user of `--sim` hits.
+### 7. `introduce()` failure path sets master to 0 even in `--sim`  (FIXED)
+If apcsim.py wasn't running yet when the controller started, `introduce()`
+timed out and master went to 0 — correct, per invariant 10 — but the
+simulator's HELLO resync then repainted LEDs **without** replaying fader
+positions, so the rig stayed dark until a fader was physically moved.
 
-### 8. The OS2L `_beats` deque can drop beats silently
+**Fix as applied**, entirely controller-side, since apcsim already answers
+`ENQUIRE` at any time: `virtualapc.poll()` sends an `ENQUIRE` when it sees a
+HELLO, and turns an `INTRO` arriving outside `introduce()` into ordinary
+`("fader", n, value)` events. `handle()` already routes those through
+`apply_fader`, so the positions arrive by the same path a physical move
+takes and no new machinery exists. `introduce()` discards `poll()`'s return
+value, so the startup path cannot double-apply.
+
+Verified by starting a real controller with no simulator, letting the
+Introduction time out, then announcing a simulator with HELLO: the
+controller asks for the positions, master goes 0 → 255, and a pad press
+lights channels that were dark before. Confirmed against the pre-fix code
+that the same sequence leaves the rig at nothing.
+
+### 8. The OS2L `_beats` deque can drop beats silently  (FIXED)
 `deque(maxlen=64)` discards the *oldest* on overflow. 64 beats is ~28s at
 138bpm, so this only fires if the main loop stalls badly — but the one
 thing that stalls it is a big synchronous reload (item under D-14), and the
@@ -158,11 +174,29 @@ lands correctly afterwards, so severity is low, but a counter of dropped
 beats reported once (like the monitor's stats) would make the invisible
 visible.
 
-### 9. `tempo.InternalClock.poll()` catch-up guard hides its own reports
-The `> period * 4` guard silently re-anchors after a stall (laptop sleep).
-Correct behaviour, but it also resets after a *blocking reload*, so a
-tapped phase quietly shifts. One `on_status`-style callback or a returned
-flag ("re-anchored, phase lost") would let the controller print it.
+**Fix as applied:** `BeatClock.dropped_beats` counts every overflow and the
+first one is reported through `on_status`, once, in the same shape as the
+malformed-message report. Deliberately still a report rather than a bigger
+queue: if this fires, something stalled the main loop for ~28s and *that* is
+the bug — a deeper queue would only hide it for longer.
+
+### 9. `tempo.InternalClock.poll()` catch-up guard hides its own reports  (FIXED)
+The `> period * 4` re-anchor is correct — a burst of catch-up beats would
+race a chaser through several steps — but it was silent, so a tapped downbeat
+could move without a word. `InternalClock` now takes an `on_status` callback,
+the same pattern `DmxSender` and `BeatClock` use, counts re-anchors, and the
+controller prints them alongside the other clock messages.
+
+Verified on a live `--sim` controller by arming the bpm fader and stopping
+the process with SIGSTOP for five seconds:
+
+    [clock: re-anchored after a 5.0s stall -- phase shifted, re-tap if it
+     has drifted]
+
+Matters more here than the original note suggested: this show runs 34
+beat-synced chasers, and pos keeps counting through a re-anchor, so nothing
+jumps a step — what moves is the phase against the music, which only an ear
+can catch. Now the terminal says it happened.
 
 ### 10. Fader 1-step diff suppression can strand the last position  (FIXED)
 `set_level`/`set_scale` skipped when the value was unchanged — but they
@@ -195,13 +229,11 @@ dropped with a reason, the good beats still arrive, the thread stays alive
 and the tempo holds. Before the change the same sequence killed the thread
 and the next write got a broken pipe.
 
-### 12. `check_adapter` + `DmxSender` race
-`check_adapter` finds the port, then `DmxSender.__init__` globs again via
-`find_port()` only if `port=None` — controller passes nothing, so the port
-found in preflight and the port opened can differ if devices change in
-between. Cosmetic in practice (both pick `sorted()[0]`), but passing the
-checked port into `DmxSender(port=port)` costs one word and removes the
-window.
+### 12. `check_adapter` + `DmxSender` race  (FIXED)
+`check_adapter` found the port, then `DmxSender.__init__` globbed again
+because the controller passed nothing, so the port checked and the port
+opened could differ if devices changed in between. The controller now
+passes what preflight found: `dmx.DmxSender(port=port, ...)`.
 
 ---
 
@@ -225,16 +257,34 @@ becomes user-visible around 1000+ scenes. If it ever matters, parse on a
 worker thread and hand the finished object set to the main loop for the
 swap — the `_parse()` structure already supports exactly that.
 
-### 15. `handle()`'s held-binding capture is correct and subtle
+### 15. `handle()`'s held-binding capture is correct and subtle  (TESTED)
 Release uses the binding captured at press (`state["held"]`), so releasing
 SHIFT before a flash pad still stops the right target. This is right, and
-easy to break in refactoring. Worth a test — it's the kind of correctness
-that survives only as long as nobody "simplifies" it.
+easy to break in refactoring.
 
-### 16. Two sources of truth for the surface constant tables
-apc.py and virtualapc.py duplicate GRID/TRACK/SCENE/FEEDBACK constants.
-They agree today. A `surface_constants.py` both import from would make
-drift impossible; alternatively a startup assert comparing them.
+`TestHeldBindingCapture` now pins it: press a flash pad on the SHIFT layer,
+release SHIFT, release the pad, and the scene captured at press is the one
+that stops. Confirmed the test fails when the release path is "simplified"
+into a fresh `binding_for()` lookup — which strands the held scene on, with
+no pad left that turns it off.
+
+### 16. Two sources of truth for the surface constant tables  (FIXED)
+apc.py and virtualapc.py duplicated GRID/TRACK/SCENE/FEEDBACK — and it was
+three copies, not two, counting apc_leds.py. They did **not** stay in
+agreement: moving idle from 10% to 25% took three edits and the third was
+missed, leaving the contrast test previewing a gap the controller no longer
+produced.
+
+Now `surface_constants.py`, which depends on nothing, holds the table; apc.py
+and virtualapc.py import the names explicitly and re-export them, so
+`apc_mod.GRID` and `apc_mod.IDLE` still work for every call site. apc_leds.py
+keeps its own sixteen-entry protocol table on purpose — listing every
+behaviour is that tool's job — but takes `IDLE` from the shared file and
+derives its printed label from it.
+
+`TestSurfaceConstants` checks both surfaces against the shared table name for
+name (the real one where mido is installed), which is the test that would
+have caught the original drift.
 
 ### 17. dmxmon reads the patch once at startup
 Already documented in conversation, restated for the file: a reload in the
@@ -246,24 +296,33 @@ becomes annoying.
 
 ## D. Small correctness nits
 
-18. controller.py docstring: the usage block got split by a later insert —
-    `--check`/`--feedback` lines now sit *below* the tempo-fallback
-    paragraph, reading as if they belong to it.
-19. `if True:` block in the main loop (beat drain) is a leftover from a
-    patch — harmless, should be flattened for readability.
-20. `describe_active` calls `chaser_position` twice per chaser in the
-    step-all log path in `handle()` (minor, log-path only).
+18. **(FIXED)** controller.py docstring: the usage block had been split by a
+    later insert, leaving `--check`/`--feedback` below the tempo-fallback
+    paragraph as if they belonged to it. The flags are one block again, with
+    the tempo paragraph after them — and `--watch`, which was never listed
+    at all, is now in it.
+19. **(FIXED)** `if True:` in the main loop (beat drain), a leftover from a
+    patch. Flattened.
+20. **(NOT REPRODUCIBLE)** The claim was that `describe_active` calls
+    `chaser_position` twice per chaser in the step-all log path.
+    `chaser_position` has exactly one call site in the whole of
+    controller.py — inside `describe_active`, reached once per chaser per
+    log line. Either this was fixed by an earlier change or the reading was
+    wrong. No code change.
 21. `flash_pad`'s grid-pad branch paints colour but never repaints after
     `flash_until` expiry if `eng.dirty` never goes true in between — the
     expiry sets `relayout`, which does handle it. Verified fine; noted so
     the double mechanism (relayout flag vs dirty) is understood as
     intentional.
-22. `os2l.BeatClock.stop()` closes zeroconf before joining the thread; if
-    the thread is inside `_advertise` teardown this could race. Order:
-    set stop event, join, then close zeroconf.
-23. `bpm_from_fader` rounds to int; `TapTempo.bpm` rounds to 0.1. The
-    display code prints both through the same path, so a tapped 119.9
-    and a fader 120 read differently. Cosmetic.
+22. **(FIXED)** `os2l.BeatClock.stop()` closed zeroconf before joining the
+    thread. Now: set the stop event, join, then close.
+23. **(NOT REPRODUCIBLE)** The claim was that a tapped 119.9 and a fader 120
+    "read differently". They do not: `set_bpm` stores `float(bpm)`, so the
+    fader path prints `120.0` and the tap path `119.8` — both one decimal,
+    through the same f-string. What differs is input resolution (the fader
+    has 127 steps across 60-180 BPM, so it can only land on whole numbers;
+    a tap can land anywhere), and that is inherent, not a display bug. No
+    code change.
 
 ---
 
@@ -277,8 +336,27 @@ becomes annoying.
 4. ~~Add the engine thread-contract docstring (13) while the reasoning is
    fresh.~~ **Done.**
 
-Everything else is optional polish. The core architecture — one transmit
-thread, state mutation on the main loop, queues at every thread boundary,
-phase-derived beat sync — held up well under reading; the bugs are all at
-the seams where later features (watch, faders, reload) were bolted on
-without re-checking the threading doctrine.
+Everything else was optional polish, and has since been done too. The core
+architecture — one transmit thread, state mutation on the main loop, queues
+at every thread boundary, phase-derived beat sync — held up well under
+reading; the bugs were all at the seams where later features (watch, faders,
+reload) were bolted on without re-checking the threading doctrine.
+
+## Where this stands
+
+Every actionable item is closed. What is left is deliberate:
+
+- **3** — `solo` stopping chasers is documented and pinned, not changed. The
+  decision is open to revisit; the two alternatives are written out under
+  the item. The show's 32 `solo` chaser pads are an argument for leaving it.
+- **14** — reload is synchronous in the main loop. Measured ~50ms at 300
+  scenes; this show has 201, so it is not user-visible. The `_parse()`
+  structure already supports moving it to a worker if it ever is.
+- **17** — dmxmon reads the patch once at startup, so a reload does not
+  re-label it. Known limitation, not worth the mtime watching it would need.
+- **20, 23** — checked and not reproducible. See the notes on each.
+- **21** — verified correct when the review was written; still is.
+
+The live validation that matters: a six-hour show with the full rig, real
+cable run, 120Ω termination, and Virtual DJ driving the beat throughout, with
+no flicker and no dropout.

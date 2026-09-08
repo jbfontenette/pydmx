@@ -14,29 +14,14 @@ import time
 
 import simlink
 
-# Mirrors of apc.py's constants, so callers need not care which they hold.
-GRID = range(0x00, 0x40)
-TRACK_BUTTONS = range(0x64, 0x6C)
-SCENE_BUTTONS = range(0x70, 0x78)
-SHIFT = 0x7A
-FADER_CC = range(0x30, 0x39)
-
-SOLID_10 = 0
-SOLID_25 = 1
-SOLID_50 = 2
-SOLID_100 = 6
-PULSE_4 = 9
-BLINK_4 = 14
-BLINK_2 = 15
-OFF = 0
-IDLE = SOLID_25         # must match apc.py -- see the reasoning there
-
-FEEDBACK = {
-    "intensity": SOLID_100,
-    "pulse": PULSE_4,
-    "blink": BLINK_4,
-    "fast-blink": BLINK_2,
-}
+# The same table apc.py re-exports, from the same file -- so a caller holding
+# this module sees exactly what it would see holding the real one. These used
+# to be a hand-copied mirror, which is how the idle brightness drifted.
+from surface_constants import (              # noqa: F401 -- re-exported
+    GRID, TRACK_BUTTONS, SCENE_BUTTONS, SHIFT, FADER_CC,
+    SOLID_10, SOLID_25, SOLID_50, SOLID_100, PULSE_4, BLINK_4, BLINK_2,
+    OFF, IDLE, FEEDBACK,
+)
 
 
 class VirtualAPC:
@@ -61,9 +46,23 @@ class VirtualAPC:
             elif kind == simlink.FADER and len(payload) >= 3:
                 events.append(("fader", payload[1], payload[2]))
             elif kind == simlink.INTRO and len(payload) >= 10:
-                self._pending_faders = list(payload[1:10])
+                positions = list(payload[1:10])
+                self._pending_faders = positions
+                # An INTRO arriving here rather than inside introduce() means
+                # the simulator has just (re)appeared and told us where its
+                # faders are. Turn it into ordinary fader events so the
+                # controller applies them through the same path a physical
+                # move takes -- otherwise master sits wherever a failed
+                # introduce() left it, which is 0, and the rig stays dark
+                # until something is touched. introduce() throws poll()'s
+                # return away, so the startup path cannot double-apply.
+                events.extend(("fader", number, value)
+                              for number, value in enumerate(positions, 1))
             elif kind == simlink.HELLO:
                 self._resend_all()
+                # The LED cache covers the surface, but nothing on this side
+                # knows where the simulator's faders are sitting. Ask.
+                self.link.send(bytes([simlink.ENQUIRE]))
         return events
 
     def _resend_all(self):

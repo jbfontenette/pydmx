@@ -144,6 +144,24 @@ class TestOS2LBadMessages(unittest.TestCase):
         self.feed({"evt": "beat", "pos": "one"})
         self.assertEqual(len(self.status), 2)
 
+    def test_an_undrained_queue_says_so_once(self):
+        # The deque drops the OLDEST on overflow, so beats vanish silently
+        # and the only symptom is a chaser appearing to jump. If this fires,
+        # something stalled the main loop -- that is the actual bug, and it
+        # cannot be found if the queue swallows the evidence.
+        for pos in range(70):                   # maxlen is 64
+            self.feed(self.good(pos))
+        self.assertEqual(self.clock.dropped_beats, 6)
+        self.assertEqual(len(self.status), 1)
+        self.assertIn("not draining", self.status[0])
+
+    def test_a_drained_queue_says_nothing(self):
+        for pos in range(200):
+            self.feed(self.good(pos))
+            self.clock.poll()                   # the main loop, keeping up
+        self.assertEqual(self.clock.dropped_beats, 0)
+        self.assertEqual(self.status, [])
+
     def test_non_beat_messages_still_pass_through(self):
         self.feed({"evt": "btn", "name": "pad1", "state": True})
         self.assertEqual(len(self.clock.poll_messages()), 1)
@@ -233,6 +251,30 @@ class TestInternalClock(unittest.TestCase):
         clock.poll(now=0.0)
         self.assertLessEqual(len(clock.poll(now=60.0)), 2)
 
+    def test_a_stall_says_it_moved_the_phase(self):
+        # Re-anchoring is right, but it silently shifts a tapped downbeat.
+        # Silence is what made this invisible: the beats keep coming, just
+        # against different moments than the ones that were tapped.
+        said = []
+        clock = tempo.InternalClock(on_status=said.append)
+        clock.set_bpm(120, now=0.0)
+        clock.poll(now=0.0)
+        clock.poll(now=60.0)
+        self.assertEqual(clock.reanchors, 1)
+        self.assertEqual(len(said), 1)
+        self.assertIn("re-anchored", said[0])
+
+    def test_normal_polling_says_nothing(self):
+        # It must stay quiet through ordinary running, or the message is
+        # noise and gets ignored on the night it matters.
+        said = []
+        clock = tempo.InternalClock(on_status=said.append)
+        clock.set_bpm(120, now=0.0)
+        for tick in range(20):
+            clock.poll(now=tick * 0.1)
+        self.assertEqual(said, [])
+        self.assertEqual(clock.reanchors, 0)
+
 
 class TestColours(unittest.TestCase):
     def test_names_normalise(self):
@@ -267,6 +309,103 @@ class TestColours(unittest.TestCase):
         full = colours.rgb("red")
         idle = colours.rgb("red", colours.IDLE_SCALE)
         self.assertLess(max(idle), max(full) / 4)
+
+
+class TestSurfaceConstants(unittest.TestCase):
+    """The real surface and the simulator must describe the same device.
+
+    controller.py reaches every one of these through whichever module it
+    happens to hold, so a difference between them is a bug that only shows up
+    in one of the two setups -- the hardest kind to notice. They share one
+    source now; this checks the re-exports did not miss anything.
+    """
+
+    SHARED = ("GRID", "TRACK_BUTTONS", "SCENE_BUTTONS", "SHIFT", "FADER_CC",
+              "SOLID_10", "SOLID_25", "SOLID_50", "SOLID_100",
+              "PULSE_4", "BLINK_4", "BLINK_2", "OFF", "IDLE", "FEEDBACK")
+
+    def test_the_simulator_matches_the_shared_table(self):
+        import surface_constants
+        import virtualapc
+        for name in self.SHARED:
+            self.assertEqual(getattr(virtualapc, name),
+                             getattr(surface_constants, name), name)
+
+    def test_the_real_surface_matches_the_shared_table(self):
+        # apc.py needs mido. Where it is installed -- a machine that can
+        # actually drive the hardware -- check it too; elsewhere the
+        # simulator check above still covers the re-export.
+        try:
+            import apc
+        except ImportError:
+            self.skipTest("mido not installed")
+        import surface_constants
+        for name in self.SHARED:
+            self.assertEqual(getattr(apc, name),
+                             getattr(surface_constants, name), name)
+
+    def test_idle_is_dimmer_than_every_active_style(self):
+        # The point of the brightness scheme: an idle pad must never be as
+        # bright as an active one, whichever feedback style is selected.
+        import surface_constants as sc
+        self.assertLess(sc.IDLE, sc.SOLID_100)
+        self.assertNotIn(sc.IDLE, sc.FEEDBACK.values())
+
+
+class TestSimulatorReconnect(unittest.TestCase):
+    """A simulator that starts late must not leave the rig dark.
+
+    introduce() times out when apcsim is not up yet, so master fails safe to
+    0. The simulator then announces itself with HELLO -- at which point the
+    controller has to ask again where the faders are, or everything stays at
+    0 until a fader is physically moved. That is the first thing a new user
+    of --sim hits.
+    """
+
+    class StubLink:
+        """Stands in for simlink.Endpoint. No socket, no ports to collide."""
+
+        def __init__(self, incoming=()):
+            self.incoming = list(incoming)
+            self.sent = []
+
+        def drain(self):
+            out, self.incoming = self.incoming, []
+            return out
+
+        def send(self, payload):
+            self.sent.append(bytes(payload))
+
+    def surface(self, *incoming):
+        import virtualapc
+        apc = virtualapc.VirtualAPC.__new__(virtualapc.VirtualAPC)
+        apc._led = {}
+        apc._pending_faders = None
+        apc.link = self.StubLink(incoming)
+        return apc
+
+    def test_hello_asks_where_the_faders_are(self):
+        apc = self.surface(bytes([simlink.HELLO]))
+        apc.poll()
+        self.assertIn(bytes([simlink.ENQUIRE]), apc.link.sent)
+
+    def test_a_late_intro_becomes_fader_events(self):
+        # Outside introduce(), an INTRO is news: the surface just told us
+        # where it is sitting, and those positions have to reach the engine
+        # through the same path a physical move takes.
+        positions = [0, 10, 0, 0, 0, 0, 0, 0, 127]
+        apc = self.surface(bytes([simlink.INTRO] + positions))
+        events = apc.poll()
+        self.assertEqual(events[0], ("fader", 1, 0))
+        self.assertEqual(events[1], ("fader", 2, 10))
+        self.assertEqual(events[8], ("fader", 9, 127))
+
+    def test_introduce_still_returns_the_positions(self):
+        # introduce() throws poll()'s return away, so the startup path reads
+        # the positions once and cannot double-apply them.
+        positions = [0] * 8 + [127]
+        apc = self.surface(bytes([simlink.INTRO] + positions))
+        self.assertEqual(apc.introduce(timeout=0.1), positions)
 
 
 class TestWireFormats(unittest.TestCase):

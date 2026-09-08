@@ -249,8 +249,12 @@ class NullSender:
             return bytes(self._frame)
 
     def send(self):
-        # Paced like the real thing so the monitor sees a realistic rate.
-        time.sleep(FRAME_WIRE_TIME)
+        # Returns immediately. run_until() paces itself and never calls this,
+        # so the only callers are tools driving the sender by hand -- and
+        # blocking them for a frame time buys nothing when there is no wire
+        # to keep clear. A caller that wants a realistic frame rate should
+        # sleep for it itself, visibly, rather than have send() do it.
+        pass
 
     def run_until(self, stop_event, refresh_hz=DEFAULT_REFRESH_HZ, on_frame=None):
         budget = 1.0 / refresh_hz

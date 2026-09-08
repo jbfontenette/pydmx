@@ -35,7 +35,14 @@ GRID = range(0x00, 0x40)          # pads 0-63
 TRACK_BUTTONS = range(0x64, 0x6C)  # red single-colour LEDs
 SCENE_BUTTONS = range(0x70, 0x78)  # green single-colour LEDs
 
-# Behaviour is the MIDI channel on a Note On (protocol table, page 3).
+# What the controller actually paints an idle pad with. Imported rather than
+# repeated: this script exists to preview the real thing, so if the two ever
+# disagree the preview is worse than useless.
+from surface_constants import IDLE
+
+# Behaviour is the MIDI channel on a Note On (protocol table, page 3). The
+# full sixteen are listed here deliberately -- showing every one of them on
+# the device is what the `behaviour` test is for.
 SOLID_10, SOLID_25, SOLID_50, SOLID_65 = 0, 1, 2, 3
 SOLID_75, SOLID_90, SOLID_100 = 4, 5, 6
 PULSE_16, PULSE_8, PULSE_4, PULSE_2 = 7, 8, 9, 10
@@ -251,13 +258,13 @@ def test_contrast(out):
     """Idle vs active brightness, side by side, so you can judge the gap."""
     import colours
     clear_grid(out)
-    print("Left half of each row = IDLE (25%), right half = ACTIVE (100%).\n")
+    label = dict(BEHAVIOURS).get(IDLE, f"channel {IDLE}")
+    print(f"Left half of each row = IDLE ({label}), "
+          f"right half = ACTIVE (solid 100%).\n")
     for i, name in enumerate(colours.ORDER[:8]):
         index = colours.palette(name)
         for col in range(4):
-            # Must stay whatever apc.IDLE is, or this test previews a
-            # contrast the controller does not actually produce.
-            pad(out, note_at(i, col), index, SOLID_25)
+            pad(out, note_at(i, col), index, IDLE)
         for col in range(4, 8):
             pad(out, note_at(i, col), index, SOLID_100)
         print(f"  row {i}  {name}")

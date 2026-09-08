@@ -282,7 +282,7 @@ not parse, the running show is kept and the next save is what tries again.
 python3 -m unittest discover -s tests -t tests
 ```
 
-133 tests, no hardware and no third-party packages required. They cover the
+146 tests, no hardware and no third-party packages required. They cover the
 merge policy, patch arithmetic, chaser phase-locking, OS2L framing, reload
 reconciliation and the tempo maths — the decisions that are easy to
 "simplify" into bugs.

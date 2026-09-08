@@ -13,7 +13,7 @@ Read `README.md` for the CSV formats and `REVIEW.md` for known bugs.
 ## Before you start
 
 ```bash
-python3 -m unittest discover -s tests -t tests      # 133 tests, ~0.6s
+python3 -m unittest discover -s tests -t tests      # 146 tests, ~0.6s
 python3 controller.py --check                        # validate CSVs
 ```
 
