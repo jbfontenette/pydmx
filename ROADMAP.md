@@ -62,7 +62,7 @@ screen decision — an in-place status line, or the separate-process pattern
 | Now | Medium | Later |
 |---|---|---|
 | **3** X-Touch Mini: validate, then drive (swap model, A/B, encoder push) | **2** beat fractions | **1b** crossfade |
-| | **1a** fade-in / hold / fade-out | **6** beat sync from audio |
+| **16** choose the show folder from the command line | **1a** fade-in / hold / fade-out | **6** beat sync from audio |
 | | **7** section-aware chasers via OS2L | **9** scenes of scenes |
 | | **4** Ableton Link / Rekordbox | **11** GUI for configuration |
 | | **5** Pro DJ Link | **12** GUI for fixture preview |
@@ -128,6 +128,34 @@ become a confirmed control map, written into the driver's header the way
   reuse the fader path unchanged. This is the fork the probe resolves.
 
 `xtouchsim` mirrors `apcsim`, so a show can still be built on a train.
+
+### 16. Choose the show folder from the command line
+
+Added after the original fifteen. Small, and it unblocks everything else that
+needs a show to test against.
+
+`showfile.Show(directory)` already takes a path — the plumbing is there. What
+is missing is the wiring: `SHOW_DIR = "show"` is a module-level constant in
+`controller.py`, `play_scene.py`, `dmxmon.py` and `os2l_drive.py`, so every
+tool can only ever read the one folder beside it. A `--show PATH` flag on
+each, defaulting to today's behaviour, is most of the work.
+
+Why it matters more than its size suggests: a second show cannot exist
+alongside the first. Different venues, a stripped-down rehearsal rig, or a
+copy to experiment on all mean editing the live files in place. It also costs
+time during development — every end-to-end check on this project so far has
+had to copy `show/` into a scratch directory and run from there, purely
+because the path could not be passed in.
+
+Two details to settle when it is built:
+
+- `Show._resolve_mapping` looks for `mapping.csv` in the show directory and
+  then *beside the script*. That fallback exists because a mapping in the
+  wrong place used to load zero bindings silently. With an explicit
+  `--show PATH`, falling back to a `mapping.csv` from somewhere else becomes
+  surprising rather than helpful — decide whether it still applies.
+- `--watch` needs nothing: it watches whatever directory the `Show` was built
+  with, so it follows the flag for free.
 
 ---
 
