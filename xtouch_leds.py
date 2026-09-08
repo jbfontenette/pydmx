@@ -26,14 +26,18 @@ value CC per ring. None of that is true of this unit in Standard mode; all
 three were tested and none worked. The numbers live in xtouch_dump.py and
 are imported, so this file cannot drift from them.
 
-What to write down while running it:
+EVERY MODE HERE HAS BEEN RUN AND ANSWERED; see xtouch_dump.py for the map
+they produced. They stay because the answers are the driver's foundation and
+a firmware or mode change could move any of them -- and because two of them
+only gave the right answer on the second attempt, so the wrong way to run
+each one is written into its docstring.
 
-  ring    what a value DRAWS -- a single dot that tracks, or a fill from one
-          end. The style is a device-side setting per encoder per layer, set
-          in X-Touch Editor and not reachable over MIDI, so this says what
-          the unit is currently configured to show.
-  states  which velocities mean off, on, and blink.
-  layers  whether a lit lamp survives a switch away and back.
+The one thing still worth looking at rather than re-confirming is 'ring':
+what a value DRAWS -- a single travelling dot, or a fill from one end. That
+style is a device-side setting per encoder per layer, made in X-Touch Editor
+and not reachable over MIDI, so the mode reports how the unit is configured
+rather than testing the protocol. Pan and tilt want the dot; a level wants
+the fill.
 
 Run xtouch_dump.py --learn first, for the input side.
 
@@ -219,19 +223,20 @@ def test_states(out, number):
 def test_layers(out):
     """Does the device remember LED state across a layer switch?
 
-    The addressing question is settled: each layer has its own note range
-    (8-23 and 32-47), and a note for the INACTIVE layer is discarded rather
-    than stored. What is left is what happens to a lamp that was already
-    lit when you switch away and back -- and that decides how much the
-    driver has to repaint.
+    ANSWERED on 2026-09-08: yes, and independently per layer. Note 8 lit on
+    layer A survived a switch to B and back, and layer B showed nothing in
+    between -- including the note 32 sent while A was showing, which was
+    dropped at the moment it was sent rather than stored for later.
 
-      remembered   the controller paints each layer once and the device
-                   shows the right picture on its own
-      forgotten    every layer switch means a full repaint, which is the
-                   refresh() pattern apc.py already has
+    So the device holds two LED surfaces and shows one. The driver keeps a
+    desired and a delivered state per layer, writes only to the layer that
+    is showing, and flushes the difference when a layer appears. What it
+    must NOT do is repaint everything on a switch, which is what would be
+    right if the device forgot.
 
-    The switch is by HAND: program change does not move this device, so the
-    prompts ask you to press LAYER yourself.
+    Kept for re-testing after a firmware change, since the whole paint
+    policy rests on it. The switch is by HAND: program change does not move
+    this device.
     """
     lit, other = LED_NOTE["A"].start, LED_NOTE["B"].start
     print(f"Notes {lit} (layer A button 1) and {other} (layer B button 1).\n")

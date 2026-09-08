@@ -147,22 +147,37 @@ FADER_CC = {"A": 9, "B": 10}
 #     is layer B's first button, the correct address, so the test was aimed
 #     at something real.
 #
-# So the controller cannot paint blindly: to light a button it must send the
-# ACTIVE layer's note number, and the device never says which layer that is.
-# The only source of that knowledge is input -- an arriving note below 24 is
-# layer A, 24 and above is layer B. Which means:
+# THE DEVICE REMEMBERS EACH LAYER SEPARATELY. Note 8 lit on layer A stayed
+# lit through a switch to B and back -- and layer B showed nothing in
+# between, including the note 32 sent while A was showing. So the device
+# holds two independent LED surfaces and shows one of them; what it never
+# does is accept a write to the one it is not showing.
 #
-#   * Track a believed layer, update it from every incoming note, and on a
-#     change drop the LED cache and repaint the whole surface. That is the
-#     refresh() pattern apc.py already has, and a layer switch is a
-#     deliberate gesture rather than a per-frame event, so the cost is fine.
-#   * Painting BOTH numbers for a control does not help. The inactive one is
-#     dropped, so the other layer is still stale when it becomes active.
-#   * At startup the layer is unknown, and after a switch made without
-#     touching anything the surface stays dark until the first press tells
-#     the controller where it is. Self-correcting, but visible: a switch
-#     mid-set means one dark gesture. Invariant 10 says fail safe on unknown
-#     state, and dark-until-touched is the safe direction.
+# That is the better of the two possible answers, and it decides the paint
+# policy:
+#
+#   * Keep a DESIRED state and a DELIVERED state per layer. While a layer is
+#     hidden, update desired only -- sending is pointless, the write is
+#     dropped. On a layer change, flush the difference for the layer that
+#     just appeared. At most sixteen notes, and usually none.
+#   * Do NOT drop the whole cache and repaint on a switch. That was the plan
+#     when the device was assumed to forget; it would now send sixteen
+#     redundant messages per switch for nothing. The cache stays valid
+#     precisely because we never write to a hidden layer.
+#   * Painting BOTH numbers for a control still does not help. The inactive
+#     write is dropped at the moment it is made, not stored for later.
+#
+# The layer must still be TRACKED, and input is the only source: the device
+# never announces a switch, and program change does not cause one. An
+# arriving note below 24 means layer A, 24 and above means layer B.
+#
+#   * At startup the layer is unknown. Invariant 10 says fail safe on
+#     unknown state: paint nothing until the first press says where we are,
+#     rather than guessing A and lighting a surface that may not be showing.
+#   * After a switch made without touching anything, the surface is not
+#     dark -- it shows whatever that layer was last told, which may be
+#     stale. Self-correcting on the first press, and one gesture is the
+#     whole cost.
 #   * The encoder RINGS need no painting to stay right: the device drives
 #     them from its own remembered per-layer values, so a knob the user
 #     turns always reads correctly with the controller sending nothing. For
