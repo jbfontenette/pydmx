@@ -30,10 +30,28 @@ What to write down while running it:
 
 Run xtouch_dump.py --learn first. Knowing the note a button SENDS usually
 tells you the note it LISTENS on, and this confirms it.
+
+IF NOTHING LIGHTS AT ALL, in order of likelihood:
+
+  1. Wrong MIDI channel. Everything here goes to channel 10 because that is
+     what the device sends on; 'scan-channels' sweeps the other fifteen.
+  2. The button's LED is set to local control. On this device each button
+     can be configured to light itself when pressed rather than obey
+     incoming MIDI, and that is set in Behringer's X-Touch Editor, not over
+     MIDI. A button in local mode will ignore everything sent here.
+  3. MC MODE. The photos show it off, which is what makes the encoders
+     absolute -- but the LED protocol may differ between the two modes, so
+     it is worth knowing which one you are testing under.
 """
 
 import sys
 import time
+
+# The channel comes from the map in xtouch_dump.py rather than being repeated
+# here. It was repeated here once, as 0, and every LED test silently did
+# nothing for it -- the same duplication-drift that REVIEW item 16 is about,
+# committed twice in one project.
+from xtouch_dump import CHANNEL
 
 AUTO = False
 
@@ -89,13 +107,13 @@ def find_port():
     sys.exit("Pass one with --port \"NAME\".")
 
 
-def note(out, number, velocity=127, channel=0):
+def note(out, number, velocity=127, channel=CHANNEL):
     import mido
     out.send(mido.Message("note_on", note=number, velocity=velocity,
                           channel=channel))
 
 
-def cc(out, control, value, channel=0):
+def cc(out, control, value, channel=CHANNEL):
     import mido
     out.send(mido.Message("control_change", control=control, value=value,
                           channel=channel))
@@ -157,11 +175,15 @@ def test_layers(out):
     Watch the SAME physical button through all four steps.
     """
     a_note, b_note = 8, 32          # "button top 1" on each layer
-    print("Put the device on LAYER A and watch the top-left button.\n")
+    print(f"Sending on MIDI channel {CHANNEL}, which is where the device")
+    print("sends. Put it on LAYER A and watch the top-left button.\n")
     wait("on layer A, Enter to light the layer A note")
 
     note(out, a_note, 127)
     print(f"  note {a_note} (layer A) lit -- is the button on?")
+    print("  If NOTHING lights here, stop: the layer question is moot until")
+    print("  basic LED output works. Try 'scan-channels', and see the note")
+    print("  about X-Touch Editor at the top of this file.")
     wait("Enter")
     note(out, a_note, 0)
 

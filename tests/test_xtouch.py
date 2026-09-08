@@ -135,6 +135,28 @@ class TestControlMap(unittest.TestCase):
         self.assertIsNone(xtouch_dump.name_for("cc", 19))
 
 
+class TestOutputChannel(unittest.TestCase):
+    """The LED tool must send where the device listens.
+
+    It did not. Every LED test sent on channel 0 while the device lives on
+    channel 10, so the first run on real hardware lit nothing at all and the
+    question it was meant to answer went unanswered. The channel was written
+    down in two places and only one of them was right -- the same
+    duplication-drift as REVIEW item 16.
+    """
+
+    def test_the_led_tool_uses_the_mapped_channel(self):
+        import xtouch_leds
+        self.assertEqual(xtouch_leds.CHANNEL, xtouch_dump.CHANNEL)
+
+    def test_note_and_cc_default_to_it(self):
+        import inspect
+        import xtouch_leds
+        for function in (xtouch_leds.note, xtouch_leds.cc):
+            default = inspect.signature(function).parameters["channel"].default
+            self.assertEqual(default, xtouch_dump.CHANNEL, function.__name__)
+
+
 class TestLearnWalk(unittest.TestCase):
     """The buffer-then-drain trick at the heart of --learn.
 
