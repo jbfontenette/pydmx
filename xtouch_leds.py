@@ -4,33 +4,45 @@ Behringer X-Touch Mini LED output test.
 
     pip install mido python-rtmidi
 
-    python3 xtouch_leds.py scan        # walk the note range, find the buttons
+    python3 xtouch_leds.py scan        # which LED note lights which button
+    python3 xtouch_leds.py layer b     # select a layer (Program Change)
     python3 xtouch_leds.py layers      # does an LED reach the inactive layer?
-    python3 xtouch_leds.py states 8    # what velocities does note 8 accept?
-    python3 xtouch_leds.py rings       # walk the CC range, find the LED rings
-    python3 xtouch_leds.py ring 1      # sweep every value on CC 1
+    python3 xtouch_leds.py states 0    # what velocities does an LED accept?
+    python3 xtouch_leds.py rings       # which ring belongs to which encoder
+    python3 xtouch_leds.py ring 1      # every display mode and value, ring 1
     python3 xtouch_leds.py off         # everything dark
 
 Options: --auto (run on timers), --port "NAME" (pick the MIDI output).
 NOTE: --learn, --encoders and --list belong to xtouch_dump.py, not here.
 
-Like xtouch_dump.py, this assumes NOTHING. apc_leds.py can drive the APC
-because the APC's LED scheme was established first -- Note On where the
-channel is the behaviour and the velocity is the colour. The equivalent for
-this device is unknown, so these modes sweep and let you watch, rather than
-claiming to light a particular control.
+WHAT THE DEVICE LISTENS ON is not what it sends. Behringer's X-Touch Editor
+states it plainly, and it caught this script out twice:
+
+    button LEDs     NOTE 0-15        but buttons SEND notes 8-23
+    ring behaviour  CC 1-8           how a ring displays its value
+    ring value      CC 9-16          the value itself
+    layer select    Program Change 0 / 1
+    mode select     CC 127, value 0 Standard / 1 MC
+
+So a ring needs TWO messages, and an LED note is NOT the note the button
+under it sends. The ranges live in xtouch_dump.py; this file imports them
+rather than repeating them, because repeating the MIDI channel here once
+already cost a whole hardware session.
 
 What to write down while running it:
 
-  scan    which physical button lights for which note number
-  states  which velocities mean off, on, and blink -- there may be more
-  rings   which CC drives which encoder's LED ring
-  ring    what the ring does across 0-127: a position, a fan, a pan, a
-          count -- the X-Touch rings are documented to have several display
-          modes, and this is how you see which value selects which
+  scan    which physical button lights for which note -- the point of the
+          mode. Row and position, not just "one of them lit".
+  states  which velocities mean off, on, and blink. The earlier run said
+          "every velocity is plain on", but it was sending note 8 believing
+          that was the top-left button, and per the editor it is not. That
+          measurement is suspect until this is redone on a note the manual
+          actually assigns.
+  rings   which CC pair drives which encoder's ring
+  ring    what each behaviour value does -- the editor calls the modes
+          single, pan, fan and spread, without saying which number is which
 
-Run xtouch_dump.py --learn first. Knowing the note a button SENDS usually
-tells you the note it LISTENS on, and this confirms it.
+Run xtouch_dump.py --learn first, for the input side.
 
 IF NOTHING LIGHTS AT ALL, in order of likelihood:
 
@@ -38,8 +50,8 @@ IF NOTHING LIGHTS AT ALL, in order of likelihood:
      what the device sends on; 'scan-channels' sweeps the other fifteen.
   2. The button's LED is set to local control. On this device each button
      can be configured to light itself when pressed rather than obey
-     incoming MIDI, and that is set in Behringer's X-Touch Editor, not over
-     MIDI. A button in local mode will ignore everything sent here.
+     incoming MIDI, and that is set in X-Touch Editor, not over MIDI. A
+     button in local mode will ignore everything sent here.
   3. MC MODE. The photos show it off, which is what makes the encoders
      absolute -- but the LED protocol may differ between the two modes, so
      it is worth knowing which one you are testing under.
@@ -52,7 +64,8 @@ import time
 # here. It was repeated here once, as 0, and every LED test silently did
 # nothing for it -- the same duplication-drift that REVIEW item 16 is about,
 # committed twice in one project.
-from xtouch_dump import CHANNEL
+from xtouch_dump import (CHANNEL, LAYER_PROGRAM, LED_NOTE, RING_MODES,
+                         ring_ccs)
 
 AUTO = False
 
@@ -121,22 +134,64 @@ def cc(out, control, value, channel=CHANNEL):
 
 
 def clear(out):
-    """Everything off. Broad on purpose -- we do not know the real ranges."""
-    for number in range(128):
-        note(out, number, 0)
-    for control in range(128):
-        cc(out, control, 0)
+    """Everything off, on both layers.
+
+    Broader than the documented ranges on purpose: notes 16-31 and CCs above
+    16 are not supposed to do anything, but this is a discovery tool and
+    anything it managed to light it should be able to put out.
+
+    CC 127 is the one exception. It is the mode switch -- value 0 is
+    Standard, 1 is MC -- so sending it "off" would silently reconfigure the
+    device rather than clear an LED.
+    """
+    for layer in ("A", "B"):
+        select_layer(out, layer)
+        for number in range(48):
+            note(out, number, 0)
+        for control in range(127):          # not 127 itself: mode switch
+            cc(out, control, 0)
+    select_layer(out, "A")
+
+
+def select_layer(out, layer):
+    """Switch the device to layer A or B, from the controller side.
+
+    Program Change, per the editor. Worth having on its own because it
+    settles the question the input map could not: the device is silent when
+    the user presses LAYER, but nothing stops the controller from deciding
+    which layer is showing.
+    """
+    import mido
+    out.send(mido.Message("program_change",
+                          program=LAYER_PROGRAM[layer], channel=CHANNEL))
 
 
 # --- discovery modes ------------------------------------------------------
 
 def test_scan(out):
-    """One note at a time, so you can see which control answers."""
-    print("Lighting one note at a time. Note which button responds.\n")
-    for number in range(0, 48):
+    """Which physical button each LED note lights.
+
+    The whole point of the mode, and it has to be run before anything else
+    is believed: the editor says LEDs listen on notes 0-15 while the buttons
+    SEND 8-23, so the obvious assumption -- light a button with the note it
+    sends -- is wrong for eight of the sixteen and off by a row for the
+    rest. Only the device can say which way round it is.
+
+    The walk runs past 15 deliberately. 16-31 should do nothing at all; if
+    they light the second row, the documented range is wrong and the whole
+    map needs re-reading rather than patching.
+    """
+    print("Lighting one note at a time.\n")
+    print("Write down WHICH BUTTON lights -- top or bottom row, and how far")
+    print("from the left. 'one of them lit' answers nothing.\n")
+    print(f"Notes {LED_NOTE.start}-{LED_NOTE.stop - 1} are the documented")
+    print("button LEDs. The rest are a check that nothing lies past them.\n")
+    for number in range(0, 32):
+        if number == LED_NOTE.stop:
+            print("\n--- past the documented range; expect nothing below ---\n")
         note(out, number, 127)
         print(f"  note {number:<3} on")
-        wait(f"note {number} -- Enter for next")
+        wait(f"note {number}: which button? -- Enter for next")
         note(out, number, 0)
     print("\nNothing lit at all? The device may want a different channel;")
     print("try 'scan-channels' to sweep those instead.")
@@ -187,63 +242,126 @@ def test_states(out, number):
 
 
 def test_layers(out):
-    """Does an LED sent to one layer show while the other layer is active?
+    """Do button LEDs have per-layer state, and can the controller switch?
 
-    ANSWERED 2026-09-08: no, and it is not stored either. A note sent for
-    the inactive layer is discarded -- nothing lights at the time, and
-    nothing appears on switching. So the controller must send the ACTIVE
-    layer's number, and since the device never announces the layer, it has
-    to infer it from incoming notes and repaint on a change.
+    Rewritten. The first version sent notes 8 and 32, on the assumption that
+    LED numbers mirrored input numbers (+24 for layer B). The editor says
+    they do not: LEDs listen on notes 0-15 and there is no second range at
+    all. So the earlier answer -- "a note for the inactive layer is
+    discarded" -- was measuring note 32, which is not an LED note on either
+    layer, and proved nothing about layers.
 
-    Kept as the reproduction. Watch the SAME physical button throughout;
-    the expected answers are now yes, no, no.
+    The real question is now smaller and sharper: with ONE note range for
+    sixteen buttons, does the device keep a separate LED state per layer, or
+    is the LED surface shared and only the button NUMBERS change?
+
+      shared   the controller repaints on every layer change, because what
+               a button means changed even though its lamp did not
+      per-layer  it can paint both and let the device show the right one
+
+    Run 'scan' first. This test lights note 0, and until scan says which
+    button that is, "nothing lit" and "something lit somewhere you were not
+    looking" are the same observation.
     """
-    a_note, b_note = 8, 32          # "button top 1" on each layer
-    print(f"Sending on MIDI channel {CHANNEL}, which is where the device")
-    print("sends. Put it on LAYER A and watch the top-left button.\n")
-    wait("on layer A, Enter to light the layer A note")
+    led = LED_NOTE.start
+    print(f"Sending on MIDI channel {CHANNEL}. Note {led} -- which by 'scan'")
+    print("should be a button you have already identified.\n")
 
-    note(out, a_note, 127)
-    print(f"  note {a_note} (layer A) lit -- is the button on?")
+    select_layer(out, "A")
+    wait("on layer A, Enter to light it")
+    note(out, led, 127)
+    print(f"  note {led} lit on layer A. Is a button on?")
     print("  If NOTHING lights here, stop: the layer question is moot until")
     print("  basic LED output works. Try 'scan-channels', and see the note")
     print("  about X-Touch Editor at the top of this file.")
     wait("Enter")
-    note(out, a_note, 0)
 
-    note(out, b_note, 127)
-    print(f"  note {b_note} (layer B) lit -- while still on layer A.")
-    print("  Does anything light? It should NOT, if state is per layer.")
+    print("\n  Switching to layer B by program change, leaving it lit.")
+    select_layer(out, "B")
+    print("  Did the LAYER lamp move? And is the button still lit?")
+    print("  still lit  -> the LED surface is shared across layers")
+    print("  went dark  -> the device keeps LED state per layer")
     wait("Enter")
 
-    print("\n  Now switch to LAYER B, leaving that note lit.")
-    wait("switched to B, Enter")
-    print(f"  note {b_note} was set while you were on A. Is it lit now?")
-    print("  If yes, the device holds per-layer LED state and the controller")
-    print("  can light both numbers blindly. If no, it must track the layer.")
+    note(out, led, 0)
+    note(out, led + 1, 127)
+    print(f"\n  note {led} off, note {led + 1} on, while on layer B.")
+    print("  Now switch BACK to A and see what layer A remembers.")
+    select_layer(out, "A")
     wait("Enter")
-    note(out, b_note, 0)
+    print(f"  If note {led} is lit again, state is per layer and the two")
+    print("  surfaces are independent. If you see the layer B picture, it")
+    print("  is one shared surface and the controller owns every repaint.")
+    wait("Enter")
+    note(out, led, 0)
+    note(out, led + 1, 0)
 
 
 def test_rings(out):
-    """Which CC drives which encoder ring."""
-    print("Setting one CC at a time to a mid value. Note which ring lights.\n")
-    for control in range(0, 32):
-        cc(out, control, 64)
-        print(f"  CC {control:<3} = 64")
-        wait(f"CC {control} -- Enter for next")
-        cc(out, control, 0)
+    """Which CC pair drives which encoder's ring.
+
+    Two messages per ring, not one. The first version of this mode set a
+    single CC to 64 and waited for a ring to show half -- which it never
+    could, because CC 1-8 select the DISPLAY MODE and only CC 9-16 carry a
+    value. Sending the value alone leaves the ring in whatever mode it was
+    already in; sending the mode alone gives it nothing to draw.
+    """
+    print("Each ring gets a behaviour and then a value. Note which ring.\n")
+    for index in range(1, 9):
+        behaviour_cc, value_cc = ring_ccs(index)
+        cc(out, behaviour_cc, 1)
+        cc(out, value_cc, 64)
+        print(f"  encoder {index}: CC {behaviour_cc} = 1 (mode), "
+              f"CC {value_cc} = 64 (value)")
+        wait(f"encoder {index}: which ring lit? -- Enter for next")
+        cc(out, value_cc, 0)
 
 
-def test_ring(out, control):
-    """Sweep one CC to see what the ring does across the whole range."""
-    print(f"Sweeping CC {control} through 0-127.\n")
-    for value in (0, 1, 2, 3, 6, 11, 16, 27, 32, 43, 48, 59, 64,
-                  75, 80, 91, 96, 107, 112, 123, 127):
-        cc(out, control, value)
-        print(f"  CC {control} = {value:<3}")
-        wait(f"value {value} -- Enter for next")
-    cc(out, control, 0)
+def test_ring(out, index):
+    """One ring: every display mode, then a value sweep in each.
+
+    The editor names four modes -- single, pan, fan, spread -- without
+    saying which number selects which, so the numbers are walked and you
+    say what you see. For a pan/tilt encoder the useful answer is which mode
+    draws a single dot that tracks the value; for a level, the one that
+    fills from one end.
+    """
+    behaviour_cc, value_cc = ring_ccs(index)
+    print(f"Encoder {index}: mode on CC {behaviour_cc}, "
+          f"value on CC {value_cc}.\n")
+    print("Modes the editor names, in no known order: "
+          f"{', '.join(RING_MODES)}.\n")
+
+    for behaviour in range(0, 5):
+        cc(out, behaviour_cc, behaviour)
+        cc(out, value_cc, 64)
+        print(f"  mode {behaviour}, value 64 -- dot, fan, fill, or nothing?")
+        wait(f"mode {behaviour} -- Enter to sweep it", seconds=2.0)
+        for value in (0, 16, 32, 48, 64, 80, 96, 112, 127):
+            cc(out, value_cc, value)
+            print(f"    value {value:<3}")
+            wait(f"mode {behaviour} value {value} -- Enter", seconds=0.5)
+        cc(out, value_cc, 0)
+    cc(out, behaviour_cc, 0)
+
+
+def test_layer(out, which):
+    """Select a layer with Program Change, and see whether it takes.
+
+    This is the mode that decides how the driver handles layers. If the
+    device obeys, the controller owns the layer: it can set it at startup,
+    know it without guessing, and only has to watch incoming notes to notice
+    a switch made by hand. If it does not, the earlier conclusion stands and
+    the layer can only ever be inferred.
+    """
+    print(f"Selecting layer {which} (program change "
+          f"{LAYER_PROGRAM[which]} on channel {CHANNEL}).\n")
+    print("Watch the LAYER A / LAYER B lamps on the device.")
+    select_layer(out, which)
+    wait(f"did it switch to {which}? -- Enter")
+    print("\nIf the lamp moved, the controller can drive the layer and does")
+    print("not have to infer it. If it did not, note that here and in")
+    print("xtouch_dump.py: the editor would then be describing MC mode only.")
 
 
 TESTS = {
@@ -252,7 +370,12 @@ TESTS = {
     "scan-channels": test_scan_channels,
     "rings": test_rings,
 }
-TAKES_NUMBER = {"states": test_states, "ring": test_ring}
+# Modes taking a number, and the range that number may take. 'ring' is 1-8
+# because it names an ENCODER, not a CC -- a ring is two CCs and picking one
+# of them is what the old design got wrong.
+TAKES_NUMBER = {"states": (test_states, LED_NOTE.start, 127),
+                "ring": (test_ring, 1, 8)}
+TAKES_LAYER = {"layer": test_layer}
 
 
 def main():
@@ -283,21 +406,32 @@ def main():
     args = [a for a in args if not a.startswith("-")]
 
     mode = args[0]
-    if mode not in TESTS and mode not in TAKES_NUMBER and mode != "off":
-        sys.exit(f"Unknown mode '{mode}'. Try: "
-                 f"{', '.join(sorted(set(TESTS) | set(TAKES_NUMBER)))}, off")
+    known = set(TESTS) | set(TAKES_NUMBER) | set(TAKES_LAYER) | {"off"}
+    if mode not in known:
+        sys.exit(f"Unknown mode '{mode}'. Try: {', '.join(sorted(known))}")
 
-    number = None
+    argument = None
     if mode in TAKES_NUMBER:
+        _, low, high = TAKES_NUMBER[mode]
         if len(args) < 2:
-            sys.exit(f"'{mode}' needs a number: python3 xtouch_leds.py "
-                     f"{mode} 8")
+            sys.exit(f"'{mode}' needs a number {low}-{high}: "
+                     f"python3 xtouch_leds.py {mode} {low}")
         try:
-            number = int(args[1])
+            argument = int(args[1])
         except ValueError:
             sys.exit(f"'{args[1]}' is not a number.")
-        if not 0 <= number <= 127:
-            sys.exit(f"{number} is out of range 0-127.")
+        # Each mode has its own range, and they are not the same: 'ring'
+        # names an encoder 1-8 while 'states' names an LED note. Accepting
+        # 0-127 for both let 'ring 16' through, which sent a value to a CC
+        # that means something else entirely.
+        if not low <= argument <= high:
+            sys.exit(f"{argument} is out of range {low}-{high} for "
+                     f"'{mode}'.")
+    elif mode in TAKES_LAYER:
+        argument = (args[1] if len(args) > 1 else "").strip().upper()
+        if argument not in LAYER_PROGRAM:
+            sys.exit(f"'{mode}' needs a layer: python3 xtouch_leds.py "
+                     f"{mode} a")
 
     port_name = port_name or find_port()
     with _open("out", port_name) as out:
@@ -308,13 +442,17 @@ def main():
                 print("Cleared.")
                 return
             if mode in TAKES_NUMBER:
-                TAKES_NUMBER[mode](out, number)
+                TAKES_NUMBER[mode][0](out, argument)
+            elif mode in TAKES_LAYER:
+                TAKES_LAYER[mode](out, argument)
             else:
                 TESTS[mode](out)
         except KeyboardInterrupt:
             pass
         finally:
-            if mode != "off":
+            # 'layer' is the exception: it is meant to LEAVE the device on
+            # the layer you asked for, and clear() ends on A.
+            if mode not in ("off", "layer"):
                 print("\nClearing...")
                 clear(out)
 

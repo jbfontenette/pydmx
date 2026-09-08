@@ -233,6 +233,102 @@ class TestLearnWalk(unittest.TestCase):
         self.assertEqual(found[xtouch_dump.checklist()[0]], ("cc", 16, 10))
 
 
+class TestOutputMap(unittest.TestCase):
+    """The device does not listen where it speaks.
+
+    Buttons SEND notes 8-23 and their LEDs LISTEN on 0-15; a ring is two
+    CCs, not one. Both facts were learned late, after a hardware session
+    spent testing an LED protocol through numbers that address nothing, so
+    they are pinned here rather than left in a comment.
+    """
+
+    def test_led_notes_are_not_the_notes_buttons_send(self):
+        # The trap: reuse the input number for output and the bottom row
+        # (notes 16-23) addresses nothing at all, while the top row lands on
+        # LED notes 8-15 -- valid numbers, so no error, just the wrong half
+        # of the surface lighting up.
+        sent = set(xtouch_dump.BUTTONS_TOP["A"]) | set(
+            xtouch_dump.BUTTONS_BOTTOM["A"])
+        self.assertEqual(len(sent), len(xtouch_dump.LED_NOTE))
+        self.assertFalse(sent <= set(xtouch_dump.LED_NOTE))
+
+    def test_a_ring_is_a_behaviour_and_a_value(self):
+        for index in range(1, 9):
+            behaviour, value = xtouch_dump.ring_ccs(index)
+            self.assertIn(behaviour, xtouch_dump.RING_BEHAVIOUR_CC)
+            self.assertIn(value, xtouch_dump.RING_VALUE_CC)
+            self.assertNotEqual(behaviour, value)
+
+    def test_ring_ccs_refuses_a_number_that_is_not_an_encoder(self):
+        for index in (0, 9, 16, -1):
+            with self.assertRaises(ValueError):
+                xtouch_dump.ring_ccs(index)
+
+    def test_the_ring_mode_takes_an_encoder_not_a_cc(self):
+        # 'ring 16' used to be accepted and sent a value to CC 16, which is
+        # another encoder's ring value. The range says what the number means.
+        import xtouch_leds
+        self.assertEqual(xtouch_leds.TAKES_NUMBER["ring"][1:], (1, 8))
+
+
+class TestOutputMessages(unittest.TestCase):
+    """What the probe actually puts on the wire, with mido stubbed out."""
+
+    class Recorder:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, message):
+            self.sent.append(message)
+
+    def run_with_stub(self, function, *args):
+        """Call an xtouch_leds function with a fake mido and no prompts."""
+        import xtouch_leds
+
+        class Message(types.SimpleNamespace):
+            def __init__(self, type, **fields):
+                super().__init__(type=type, **fields)
+
+        stub = types.SimpleNamespace(Message=Message)
+        out = self.Recorder()
+        with mock.patch.dict("sys.modules", {"mido": stub}), \
+                mock.patch.object(xtouch_leds, "wait", lambda *a, **k: None), \
+                contextlib.redirect_stdout(io.StringIO()):
+            function(out, *args)
+        return out.sent
+
+    def test_clear_leaves_the_mode_switch_alone(self):
+        import xtouch_leds
+        sent = self.run_with_stub(xtouch_leds.clear)
+        # CC 127 is Standard/MC mode, not an LED. Clearing it would
+        # reconfigure the device -- and in MC mode the encoders go relative,
+        # which changes the whole driver design.
+        self.assertFalse([m for m in sent
+                          if m.type == "control_change" and m.control == 127])
+        self.assertTrue([m for m in sent if m.type == "note_on"])
+
+    def test_selecting_a_layer_is_a_program_change(self):
+        import xtouch_leds
+        for layer, program in xtouch_dump.LAYER_PROGRAM.items():
+            sent = self.run_with_stub(xtouch_leds.select_layer, layer)
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(sent[0].type, "program_change")
+            self.assertEqual(sent[0].program, program)
+            self.assertEqual(sent[0].channel, xtouch_dump.CHANNEL)
+
+    def test_the_rings_probe_sends_both_messages(self):
+        # The original sent one CC and waited for a ring to show a value,
+        # which it never could. Every encoder must get a behaviour AND a
+        # value, or the mode cannot answer the question it asks.
+        import xtouch_leds
+        sent = self.run_with_stub(xtouch_leds.test_rings)
+        controls = [m.control for m in sent if m.type == "control_change"]
+        for index in range(1, 9):
+            behaviour, value = xtouch_dump.ring_ccs(index)
+            self.assertIn(behaviour, controls)
+            self.assertIn(value, controls)
+
+
 class TestProbeImports(unittest.TestCase):
     def test_importable_without_mido(self):
         # mido is imported inside the functions that need it, so the logic

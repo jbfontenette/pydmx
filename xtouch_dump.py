@@ -92,8 +92,9 @@ FADER_CC = {"A": 9, "B": 10}
 # Three things follow, and the first overturns an earlier conclusion here.
 #
 # 1. THE CONTROLLER CAN SET THE LAYER. Program Change 0 and 1 select layer A
-#    and B. Everything above about inferring the layer from arriving notes
-#    and repainting on a guess is unnecessary: the controller can drive the
+#    and B. The LED OUTPUT section below concludes that the layer can only
+#    be inferred from arriving notes; that is now only half true. The
+#    controller can drive the
 #    layer authoritatively, know it at startup, and never be in doubt. The
 #    device is silent when the user presses LAYER, so input inference is
 #    still needed to notice a MANUAL switch -- but the controller is no
@@ -189,6 +190,30 @@ FADER_CC = {"A": 9, "B": 10}
 # nothing at all, channel 10 lights steady; the other fourteen are unknown.
 # xtouch_leds.py scan-channels walks them. Also untested: whether X-Touch
 # Editor can configure a button's LED behaviour in a way MIDI cannot reach.
+
+
+# --- what the device LISTENS on -------------------------------------------
+#
+# From the editor, not measured. Deliberately separate from the TX ranges
+# above, because they are NOT the same numbers: a button sends 8-23 and
+# listens on 0-15. Anything driving LEDs must import these rather than reuse
+# the input map -- doing that lights the wrong control, silently.
+LED_NOTE = range(0, 16)                 # button LEDs
+RING_BEHAVIOUR_CC = range(1, 9)         # how a ring displays its value
+RING_VALUE_CC = range(9, 17)            # the value itself
+LAYER_PROGRAM = {"A": 0, "B": 1}        # program change selects the layer
+MODE_CC = 127                           # value 0 Standard, 1 MC
+
+# Ring display modes, as the editor names them. Which number selects which
+# is UNVERIFIED -- xtouch_leds.py ring walks them.
+RING_MODES = ("single", "pan", "fan", "spread")
+
+
+def ring_ccs(index):
+    """(behaviour_cc, value_cc) for encoder 1-8. Two messages, never one."""
+    if not 1 <= index <= 8:
+        raise ValueError(f"encoder {index} is out of range 1-8")
+    return RING_BEHAVIOUR_CC[index - 1], RING_VALUE_CC[index - 1]
 
 
 def name_for(kind, number):
