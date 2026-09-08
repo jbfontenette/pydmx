@@ -114,8 +114,26 @@ FADER_CC = {"A": 9, "B": 10}
 # Nothing about the INPUT side is inferred any more.
 #
 # BUTTON LEDs are BINARY (xtouch_leds.py states 8, channel 10): velocity 0
-# is off and every value from 1 to 127 is plain on. No brightness steps, no
-# blink at velocity 2, nothing else hiding in the range.
+# is off and every value from 1 to 127 is plain on. No brightness steps and
+# no blink anywhere in the range.
+#
+# Measured twice. The first pass walked the velocities without resetting, so
+# it could not tell an IGNORED value from one meaning "on" -- the lamp was
+# simply still lit from the previous step. The second sets each value from
+# off, which distinguishes the three outcomes, and every velocity 1-127 lit
+# it steady. Nothing was ignored and nothing blinked.
+#
+# This CONTRADICTS the community/manual summaries in circulation, which say
+# velocity 2 blinks and 3-127 are ignored (a QLC+ thread reports different
+# numbers again, 4 for on and 6 for blink). The measurement is from this
+# unit, in Standard mode, on channel 10, and is what the driver should
+# believe until the actual Behringer document says otherwise.
+#
+# Blink may exist in MC MODE -- the Mackie protocol conventionally puts
+# flashing on velocity 1 -- but reaching it would mean giving up Standard
+# mode, and with it the absolute encoders and this entire control map. So
+# blink is not available in the configuration this driver wants, whatever
+# the manual turns out to say.
 #
 # That costs something the APC provides. On the APC an idle-but-BOUND pad
 # glows at 25% so you can see where your bindings live before pressing
@@ -128,7 +146,8 @@ FADER_CC = {"A": 9, "B": 10}
 # Untested: whether another MIDI CHANNEL carries blink, the way the APC puts
 # behaviour in the channel and colour in the velocity. Channel 0 lights
 # nothing at all, channel 10 lights steady; the other fourteen are unknown.
-# xtouch_leds.py scan-channels walks them.
+# xtouch_leds.py scan-channels walks them. Also untested: whether X-Touch
+# Editor can configure a button's LED behaviour in a way MIDI cannot reach.
 
 
 def name_for(kind, number):
