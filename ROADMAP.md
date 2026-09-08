@@ -23,13 +23,13 @@ even as the order changes.
 ## Four findings that shape the order
 
 **1. Output and LED repaint share one flag.** In `controller.py`'s main loop
-(line 688 today):
+(line 816 today):
 
 ```python
 if eng.dirty:
     sender.apply(eng.output())
     if surface and not state["flash_until"]:
-        build_leds(surface, show, eng, style, state["shift"])
+        build_leds(surface, show, eng, style, state["layer"])
 ```
 
 `dirty` only flips on an event today, so this is fine. Any feature whose
@@ -47,18 +47,18 @@ already handles. So with crossfade deferred, the work is "let output change
 between events", not "add weights to the merge model".
 
 **3. Encoders need no foundation at all.** Turning an encoder is an input
-event, exactly like moving a fader — and the probe confirmed the X-Touch's are
-**absolute**, so they reuse `apply_fader` rather than needing a binding kind of
-their own. Manual pan/tilt control is therefore reachable as soon as the driver
-exists, with no continuous rendering and no new engine concept. Only
-*automated* movement patterns need finding 1 solved.
+event, exactly like moving a fader — and the X-Touch's are **absolute**, so
+they reuse `apply_fader` rather than needing a binding kind of their own.
+Confirmed twice: by the probe, then by the driver, which added no engine
+concept at all. Manual pan/tilt is therefore reachable now, with no
+continuous rendering. Only *automated* movement needs finding 1 solved.
 
 **4. A digital BPM readout has nowhere to go but the screen.** Neither the
-APC nor the X-Touch Mini has a numeric display. The X-Touch's LED rings can be
-driven by the controller — measured, not assumed — but thirteen segments
-cannot spell a number, so they still do not answer this.
-The controller already prints `bpm 120.0` after a settle; the problem is that
-it scrolls away. The requirement is a *persistent* readout, and that is a
+APC nor the X-Touch Mini has a numeric display. The X-Touch's LED rings *can*
+be driven by the controller — the driver does it for level and scale
+encoders — but thirteen segments cannot spell a number, so they still do not
+answer this. The controller already prints `bpm 120.0` after a settle; the
+problem is that it scrolls away. The requirement is a *persistent* readout, and that is a
 screen decision — an in-place status line, or the separate-process pattern
 `monitor.py` and `dmxmon.py` already establish.
 
@@ -68,7 +68,7 @@ screen decision — an in-place status line, or the separate-process pattern
 
 | Now | Medium | Later |
 |---|---|---|
-| **3** X-Touch Mini: driver (swap model, A/B, encoder push) — probe done | **2** beat fractions | **1b** crossfade |
+| ~~**3** X-Touch Mini~~ — done, see below | **2** beat fractions | **1b** crossfade |
 | **16** choose the show folder from the command line | **1a** fade-in / hold / fade-out | **6** beat sync from audio |
 | | **7** section-aware chasers via OS2L | **9** scenes of scenes |
 | | **4** Ableton Link / Rekordbox | **11** GUI for configuration |
@@ -82,25 +82,16 @@ screen decision — an in-place status line, or the separate-process pattern
 
 ## Now
 
-### 3. X-Touch Mini — probe done, driver next
+### 3. X-Touch Mini — DONE
 
-The end state is APC alone, X-Touch alone, or both together. **Both together
-is deferred**; one surface at a time is the target for now, which the code
-already does for `apc` versus `virtualapc`. Extending that to four choices —
-`apc`, `apcsim`, `xtouch`, `xtouchsim` — is a flag change, not an
-architecture change. Two devices at once would mean merging event sources and
-keeping LED state per device, which is a different and much larger job.
+Both halves are built: the probe that measured the device
+(`xtouch_dump.py`, `xtouch_leds.py`) and the driver that uses it
+(`xtouch.py`), selected with `--surface xtouch`. `README.md` carries the
+control vocabulary; `CLAUDE.md` carries what the hardware turned out to be.
 
-**The standalone probe is finished** and on `main`: `xtouch_dump.py` for
-input and `xtouch_leds.py` for output, mirroring `apc_dump.py` and
-`apc_leds.py` and depending on nothing else in the project.
-Every control was walked on the hardware, both layers, and the map below is
-measured rather than read off a specification. It lives in `xtouch_dump.py`'s
-header, the way `apc.py` carries the APC's.
-
-**The whole surface is one sentence:** to drive a control, send the number
-that control *sends*, on the layer currently showing. The other layer's
-numbers are discarded — dropped at the moment they arrive, not queued.
+**The whole surface is one rule:** to drive a control, send the number that
+control *sends*, on the layer currently showing. The other layer's numbers
+are discarded — dropped as they arrive, not queued.
 
 | | layer A | layer B |
 |---|---|---|
@@ -110,73 +101,32 @@ numbers are discarded — dropped at the moment they arrive, not queued.
 | fader | CC 9 | CC 10 |
 
 Everything on MIDI channel 10. Note the fader irregularity: layer B's is
-CC 10, not the CC 18 a uniform offset would predict — that guess was made and
-was wrong, so the block is not a pattern to extend.
+CC 10, not the CC 18 a uniform offset predicts.
 
-**What the probe settled, and what each answer costs or saves:**
+**What it cost, against what this file estimated.** Two of the three design
+problems were cheaper than expected and a fourth appeared:
 
-- **Encoders are absolute**, not relative — the unit is in Standard mode, and
-  MC MODE is what would make them send deltas. This was the fork the probe
-  existed to resolve and it fell the cheap way: `apply_fader(number, value)`
-  already takes an absolute 0–127 position, so **encoders need no new binding
-  kind**. The device also remembers a separate position per layer, so there
-  are effectively sixteen absolute encoders, not eight.
-- **Layers are handled inside the device** for input, as hoped: the layer
-  button sends nothing at all and the device simply starts sending the other
-  set of numbers. No page state machine. But **output is not free** — see
-  below.
-- **Button LEDs are binary.** Velocity 0 is off, every value 1–127 is plain
-  on. No brightness steps, no blink, on any velocity. That costs something
-  real: on the APC an idle-but-bound pad glows at 25% so you can see where
-  your bindings live before pressing anything, and `--feedback` offers pulse
-  and blink for active ones. **On the X-Touch a bound button looks exactly
-  like an unbound one**, and the `FEEDBACK` table collapses to on/off. Worth
-  knowing before laying a show out on this surface.
-- **Ring values can be driven** by the controller, and the device keeps ring
-  state per layer. But the ring's **display style** — travelling dot, fill,
-  fan — is a device-side setting per encoder per layer, made in X-Touch
-  Editor and not reachable over MIDI. The controller picks the value; the
-  editor picks how it is drawn. A pan/tilt encoder wanting a single dot has
-  to be configured on the device beforehand, which is a setup step to
-  document rather than code to write.
-- **The device holds two LED surfaces and shows one.** State survives a layer
-  switch, so the paint policy is: keep desired and delivered state per layer,
-  write only to the layer showing, and flush the difference when a layer
-  appears — at most sixteen notes, usually none. The obvious alternative,
-  `apc.py`'s `refresh()` (drop the cache, repaint everything), would send
-  sixteen redundant messages per switch for nothing.
+- **Encoders needed no new binding kind.** They are absolute, so
+  `apply_fader` took them unchanged. This was the fork the probe existed to
+  resolve and it fell the cheap way.
+- **Control naming** went as planned, but generalised further than
+  estimated: the vocabulary moved out of `showfile.parse_pad` into each
+  surface module, so `showfile.py` no longer knows what an APC is.
+- **Layers** became one `layer` column serving both devices, as sketched.
+- **Layer tracking was the new work.** The device never announces a switch,
+  so the driver infers it and reports a `('layer', index)` event. That seam
+  also removed `controller.py`'s knowledge of which note SHIFT is.
 
-**A warning worth carrying forward.** Behringer's own X-Touch Editor
-documents an RX map — LEDs on notes 0–15, program change to select the layer,
-a separate behaviour CC and value CC per ring. **None of it is true of this
-unit in Standard mode.** All three were tested and none worked, and believing
-the editor for one commit put two correct hardware measurements in doubt. The
-device is the source; the editor is not.
+**Two things the hardware settled that no plan could.** Button LEDs are
+binary, so the APC's idle-glow scheme has no equivalent and a bound button
+looks like an unbound one — the X-Touch shows *active* state instead. And a
+ring's display style is a device-side setting made in X-Touch Editor, not
+reachable over MIDI: the controller owns the value, the editor owns how it
+is drawn.
 
-**Then the driver**, with three things to design. The list is shorter than it
-was, because the probe removed one:
-
-- **Control naming.** `showfile.parse_pad` hard-codes the APC's geometry — an
-  8×8 grid, `t1`–`t8`, `s1`–`s8`, `f1`–`f9` — and computes MIDI note numbers
-  directly. The X-Touch needs its own vocabulary for buttons, encoders,
-  encoder pushes and its fader, resolved per device.
-- **Layers.** `mapping.csv` already has a `shift` column for the APC's second
-  layer. The X-Touch's A/B is the same user-facing idea reached by a different
-  mechanism — held modifier versus latching hardware switch. One `layer`
-  column can serve both: the binding says which layer a control lives on, and
-  the device decides how a layer is reached.
-- **Layer tracking, which is the one genuinely new thing.** The device never
-  announces a switch and program change does not cause one, so the active
-  layer can only be inferred from arriving notes: below 24 is layer A, 24 and
-  above is layer B. At startup it is unknown, and by invariant 10 the right
-  response is to paint nothing until the first press says where we are —
-  guessing A would light a surface that may not be showing. After a switch
-  made without touching anything the surface is not dark; it shows whatever
-  that layer was last told, which may be stale until the first press.
-- ~~Encoders as a new binding kind~~ — **not needed.** Absolute encoders
-  reuse the fader path unchanged, `introduce()` included.
-
-`xtouchsim` mirrors `apcsim`, so a show can still be built on a train.
+**Still deferred, and why.** `xtouchsim` — the device is on the bench, so a
+simulator earns nothing yet; it mirrors `apcsim.py` when a show needs
+building away from the hardware. Two surfaces at once stays in **3b**.
 
 ### 16. Choose the show folder from the command line
 
@@ -280,8 +230,11 @@ visible, whichever clock is driving. Two routes:
 
 ### 15a. Manual pan/tilt on encoders
 
-Arrives with the X-Touch driver, by finding 3. One real gap to fix alongside
-it: **16-bit pan/tilt is not modelled anywhere.** Most moving heads split pan
+Half-arrived with the X-Touch driver, by finding 3. An encoder bound to
+`level` already drives a channel group and shows its value on the ring, so a
+pan or tilt channel can be turned by hand today. What is missing is a
+`position` type that names pan and tilt together, and one real gap to fix
+alongside it: **16-bit pan/tilt is not modelled anywhere.** Most moving heads split pan
 and tilt across a coarse and a fine channel, and `showfile.py` has no notion
 of pairing two channels into one value. That limits precision regardless of
 what is turning the knob.
