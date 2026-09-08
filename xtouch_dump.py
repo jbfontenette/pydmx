@@ -10,26 +10,27 @@ Behringer X-Touch Mini MIDI input monitor and control-map learner.
     python3 xtouch_dump.py --encoders     # absolute or relative? find out
     python3 xtouch_dump.py "X-TOUCH MINI" # open a named port
 
-NOTHING ABOUT THIS DEVICE IS CONFIRMED YET. apc_dump.py can decode the APC
-because apc.py's control map was established against hardware first; this
-script is how the equivalent gets established for the X-Touch, so it
-deliberately assumes nothing and reports raw MIDI. What it learns belongs in
-the driver's header the way apc.py carries the APC's map.
+THE MAP IS ESTABLISHED. It lives in xtouch_constants.py and this script is
+what established it, control by control on both layers. The three questions
+it existed to answer are answered:
 
-Three questions it exists to answer, in rough order of how much depends on
-them:
+  1. The encoders send an ABSOLUTE position, not a relative delta -- the
+     unit is in Standard mode, and MC MODE is what would change that. So
+     encoders reuse controller.py's existing fader path and need no binding
+     kind of their own. Use --encoders to re-check after any mode change.
 
-  1. Do the encoders send an ABSOLUTE position (0-127, like a fader) or a
-     RELATIVE delta? The device can be configured either way, and the answer
-     decides whether encoders can reuse the existing fader path in
-     controller.py or need a binding kind of their own. Use --encoders.
+  2. The layer button sends NOTHING. The device switches internally and
+     starts sending the other set of numbers, so the controller needs no
+     page state machine for input -- though its LED output does have to know
+     which layer is showing. Use --learn, which walks both layers and diffs
+     them.
 
-  2. What does the A/B layer button do? If the device swaps the note and CC
-     numbers itself, the controller never needs a page state machine for it.
-     Use --learn, which walks both layers and diffs them.
+  3. Buttons are notes 8-23 and encoder pushes 0-7 on layer A, both +24 on
+     layer B; encoders are CC 1-8 and CC 11-18, with the two faders at CC 9
+     and CC 10 in between. Use --learn.
 
-  3. Which notes are the 16 buttons and the 8 encoder pushes, and which CCs
-     are the 8 encoders and the fader? Use --learn.
+It stays because a firmware or mode change could move any of it, and because
+the wrong way to run each mode is written into that mode's docstring.
 """
 
 import sys
@@ -38,260 +39,15 @@ import time
 # mido is imported inside the functions that need it, so the classifier below
 # can be imported and tested with nothing installed.
 
-# --- control map, confirmed against hardware 2026-09-08 --------------------
-#
-# Every control on both layers sends on MIDI channel 10 (mido numbering).
-# The layer button itself sends NOTHING: the device switches layers
-# internally and simply starts sending the other set of numbers, so the
-# controller never needs a page state machine for it.
-#
-# Notes are a clean +24 between layers. THE CCs ARE NOT. The two faders sit
-# adjacent in the middle, with an encoder block on either side:
-#
-#     CC  1-8   encoders, layer A
-#     CC  9     fader,    layer A
-#     CC 10     fader,    layer B      <-- not 18, which +9 would predict
-#     CC 11-18  encoders, layer B
-#
-# That irregularity was measured, not assumed -- the tidy offset guess put
-# the layer B fader on CC 18 and was wrong. Anyone extending this should
-# check against the device rather than continue the pattern.
-CHANNEL = 10
+# The control map lives in xtouch_constants.py -- one copy, shared with
+# xtouch_leds.py and the driver. It was in this file first, which is how
+# xtouch_leds.py came to keep its own copy of the MIDI channel, as 0 instead
+# of 10, and silently light nothing for a whole session.
+from xtouch_constants import (               # noqa: F401 -- re-exported
+    CHANNEL, ENCODER_PUSH, BUTTONS_TOP, BUTTONS_BOTTOM, ENCODER_CC, FADER_CC,
+    LED_NOTE, RING_CC, RING_CC_CANDIDATES, led_note, name_for, ring_cc,
+)
 
-ENCODER_PUSH = {"A": range(0, 8), "B": range(24, 32)}
-BUTTONS_TOP = {"A": range(8, 16), "B": range(32, 40)}
-BUTTONS_BOTTOM = {"A": range(16, 24), "B": range(40, 48)}
-ENCODER_CC = {"A": range(1, 9), "B": range(11, 19)}
-FADER_CC = {"A": 9, "B": 10}
-
-# From photographs of the device, 2026-09-08:
-#
-#   * MC MODE is OFF. That is what makes the encoders absolute -- the same
-#     unit in Mackie Control mode would send relative deltas instead, and
-#     the whole encoder binding design would change. Worth checking that
-#     button before believing anything here.
-#   * Each layer keeps its OWN encoder positions. The same physical knobs
-#     show different ring values on A and B, so there are effectively 16
-#     independent absolute encoders, not 8, each remembered by the device.
-#   * The lit LAYER A / LAYER B button is the only indication of which layer
-#     is active. Nothing says so over MIDI.
-#
-# --- RX: what the device LISTENS on, measured 2026-09-08 ------------------
-#
-# IT LISTENS WHERE IT SPEAKS. Lighting a button means sending the note that
-# button SENDS -- notes 8-23 for the sixteen buttons on layer A, top row
-# then bottom, left to right. Notes 0-7 and 24-31, the encoder-push numbers,
-# light nothing, which is right: a push has no lamp.
-#
-# Worth stating flatly because Behringer's own X-Touch Editor says
-# otherwise, and believing it cost a session. Its GLOBAL tab lists an
-# RX MIDI CONTROL map:
-#
-#     LED Ring Behavior   CC 1-8
-#     LED Ring Value      CC 9-16
-#     Button LEDs         NOTE 0-15
-#     Layer A / B select  Program Change 0 / 1
-#     Standard / MC mode  CC 127 value 0 / 1
-#
-# Tested against this unit, Standard mode, channel 10:
-#
-#   * NOTE 0-15 lights nothing. Notes 8-23 light the buttons. The editor is
-#     numbering the buttons 0-15 as an index, not as MIDI notes.
-#   * PROGRAM CHANGE 0 and 1 do NOT switch the layer -- the lamp does not
-#     move. The controller cannot select the layer and is back to inferring
-#     it from arriving notes, exactly as the LED OUTPUT section below says.
-#   * CC 9-16 is not the ring value. CC 9 and 10 are the two FADERS and
-#     moved no ring at all.
-#
-# The likeliest explanation is that the editor describes MC mode, or a
-# firmware other than this one. Either way it is not a source for this
-# driver. Do not re-derive the map from it -- that is how the two measured
-# facts at the bottom of this comment came to be doubted for a day.
-#
-# RINGS answer their own encoder's transmit CC, per layer, exactly as the
-# buttons do. Measured on both layers, 2026-09-08:
-#
-#     layer A showing   CC 1-8 move rings 1-8; CC 11-18 do nothing
-#     layer B showing   CC 11-18 move rings 1-8; CC 1-8 do nothing
-#
-# CC 21-28 does nothing on either layer, so the "transmit CC plus ten" guess
-# is dead. There is no separate behaviour CC: the value is the whole message.
-#
-# So ONE RULE covers the whole surface, input and output, buttons and rings:
-#
-#     to drive a control, send the number that control SENDS on the layer
-#     that is currently showing; the other layer's numbers are discarded.
-#
-# Which is why the layer has to be tracked -- see LAYER, below. It is the
-# single fact the driver cannot do without.
-#
-# The RING DISPLAY STYLE is a device-side setting, not a MIDI one. The same
-# value drew differently on layer A and layer B on this unit, and nothing in
-# the CC selects that -- it is per encoder, per layer, and set in X-Touch
-# Editor. So the controller chooses a ring's VALUE and the editor chooses
-# how it is drawn; a pan/tilt encoder wanting a single travelling dot and a
-# level wanting a fill have to be configured on the device beforehand.
-#
-# Rings also keep per-layer state, visibly: layer A's rings sat at their
-# first LED at rest while layer B's sat dark. Same knobs, two remembered
-# positions, which matches the encoders sending independent values per
-# layer.
-#
-# LED OUTPUT, tested 2026-09-08 (xtouch_leds.py layers):
-#
-#   * Lighting a note works, on channel 10. Channel 0 lights nothing, which
-#     is worth stating because it looks exactly like a dead LED protocol.
-#   * A note sent for the INACTIVE layer is DISCARDED, not stored. Sending
-#     note 32 while the device is on layer A lights nothing at the time, and
-#     nothing appears when you then switch to layer B. This stands: note 32
-#     is layer B's first button, the correct address, so the test was aimed
-#     at something real.
-#
-# THE DEVICE REMEMBERS EACH LAYER SEPARATELY. Note 8 lit on layer A stayed
-# lit through a switch to B and back -- and layer B showed nothing in
-# between, including the note 32 sent while A was showing. So the device
-# holds two independent LED surfaces and shows one of them; what it never
-# does is accept a write to the one it is not showing.
-#
-# That is the better of the two possible answers, and it decides the paint
-# policy:
-#
-#   * Keep a DESIRED state and a DELIVERED state per layer. While a layer is
-#     hidden, update desired only -- sending is pointless, the write is
-#     dropped. On a layer change, flush the difference for the layer that
-#     just appeared. At most sixteen notes, and usually none.
-#   * Do NOT drop the whole cache and repaint on a switch. That was the plan
-#     when the device was assumed to forget; it would now send sixteen
-#     redundant messages per switch for nothing. The cache stays valid
-#     precisely because we never write to a hidden layer.
-#   * Painting BOTH numbers for a control still does not help. The inactive
-#     write is dropped at the moment it is made, not stored for later.
-#
-# The layer must still be TRACKED, and input is the only source: the device
-# never announces a switch, and program change does not cause one. An
-# arriving note below 24 means layer A, 24 and above means layer B.
-#
-#   * At startup the layer is unknown. Invariant 10 says fail safe on
-#     unknown state: paint nothing until the first press says where we are,
-#     rather than guessing A and lighting a surface that may not be showing.
-#   * After a switch made without touching anything, the surface is not
-#     dark -- it shows whatever that layer was last told, which may be
-#     stale. Self-correcting on the first press, and one gesture is the
-#     whole cost.
-#   * The encoder RINGS need no painting to stay right: the device drives
-#     them from its own remembered per-layer values, so a knob the user
-#     turns always reads correctly with the controller sending nothing. For
-#     pan/tilt that native display is exactly what is wanted. They are NOT
-#     exempt from the layer rule, though -- when the controller does drive a
-#     ring, to show a value the software owns rather than one the user
-#     turned, it must use the showing layer's CC like everything else.
-#
-# CONFIRMED control by control with --learn on 2026-09-08. Every inference
-# above held: the row nearer the encoders is notes 8-15, both rows and the
-# encoders run left to right, encoder N is CC N, and the fader irregularity
-# is real. 33 of 33 controls send different numbers on layer B; the 34th,
-# the layer button, sends nothing at all and so does not appear.
-#
-# Nothing about the INPUT side is inferred any more.
-#
-# BUTTON LEDs are BINARY (xtouch_leds.py states 8, channel 10): velocity 0
-# is off and every value from 1 to 127 is plain on. No brightness steps and
-# no blink anywhere in the range. Note 8 is the top-left button -- confirmed
-# by the note walk, so this was measured on the right lamp.
-#
-# Measured twice. The first pass walked the velocities without resetting, so
-# it could not tell an IGNORED value from one meaning "on" -- the lamp was
-# simply still lit from the previous step. The second sets each value from
-# off, which distinguishes the three outcomes, and every velocity 1-127 lit
-# it steady. Nothing was ignored and nothing blinked.
-#
-# This CONTRADICTS the community/manual summaries in circulation, which say
-# velocity 2 blinks and 3-127 are ignored (a QLC+ thread reports different
-# numbers again, 4 for on and 6 for blink). The measurement is from this
-# unit, in Standard mode, on channel 10, and is what the driver should
-# believe until the actual Behringer document says otherwise.
-#
-# Blink may exist in MC MODE -- the Mackie protocol conventionally puts
-# flashing on velocity 1 -- but reaching it would mean giving up Standard
-# mode, and with it the absolute encoders and this entire control map. So
-# blink is not available in the configuration this driver wants, whatever
-# the manual turns out to say.
-#
-# That costs something the APC provides. On the APC an idle-but-BOUND pad
-# glows at 25% so you can see where your bindings live before pressing
-# anything, and --feedback offers pulse and blink for active ones. Here a
-# bound-but-inactive button looks exactly like an unbound one, so the whole
-# idle/active brightness scheme has no equivalent and the FEEDBACK table
-# collapses to on/off. Worth knowing when laying a show out on this surface:
-# the buttons cannot show you where anything is.
-#
-# Untested: whether another MIDI CHANNEL carries blink, the way the APC puts
-# behaviour in the channel and colour in the velocity. Channel 0 lights
-# nothing at all, channel 10 lights steady; the other fourteen are unknown.
-# xtouch_leds.py scan-channels walks them. Also untested: whether X-Touch
-# Editor can configure a button's LED behaviour in a way MIDI cannot reach.
-
-
-# --- what the device LISTENS on -------------------------------------------
-#
-# Measured, not read off the editor. The RX numbers are the TX numbers: to
-# light a button, send the note it sends. So these are aliases of the input
-# ranges rather than a second map, and they exist to say so at the point of
-# use -- the alternative is every LED call site quietly assuming it.
-LED_NOTE = {layer: range(BUTTONS_TOP[layer].start, BUTTONS_BOTTOM[layer].stop)
-            for layer in ("A", "B")}
-
-# A ring listens on the CC its encoder transmits, so this is an alias of the
-# input map rather than a second one. Named separately all the same, because
-# a call site setting a ring should not read as one reading an encoder.
-RING_CC = ENCODER_CC
-
-# What xtouch_leds.py rings walks. The third block is kept in the walk after
-# being ruled out: it costs eight prompts and it is the cheapest way to
-# notice a firmware that moved things.
-RING_CC_CANDIDATES = (ENCODER_CC["A"], ENCODER_CC["B"], range(21, 29))
-
-
-def ring_cc(layer, index):
-    """CC that drives one encoder's LED ring. index is 1-8."""
-    if not 1 <= index <= 8:
-        raise ValueError(f"encoder {index} is out of range 1-8")
-    return RING_CC[layer][index - 1]
-
-
-def led_note(layer, row, index):
-    """Note that lights one button. row is 'top' or 'bottom', index 1-8."""
-    block = BUTTONS_TOP if row == "top" else BUTTONS_BOTTOM
-    if not 1 <= index <= 8:
-        raise ValueError(f"button {index} is out of range 1-8")
-    return block[layer][index - 1]
-
-
-def name_for(kind, number):
-    """Label a note or CC, or None if it is not a control we know.
-
-    Returns e.g. ("encoder 3 push", "A") so the raw log can say what was
-    touched and which layer it came from -- the layer is implied by the
-    number, since the device never announces the switch.
-    """
-    for layer in ("A", "B"):
-        if kind == "note":
-            if number in ENCODER_PUSH[layer]:
-                n = number - ENCODER_PUSH[layer].start + 1
-                return f"encoder {n} push", layer
-            if number in BUTTONS_TOP[layer]:
-                n = number - BUTTONS_TOP[layer].start + 1
-                return f"button top {n}", layer
-            if number in BUTTONS_BOTTOM[layer]:
-                n = number - BUTTONS_BOTTOM[layer].start + 1
-                return f"button bottom {n}", layer
-        elif kind == "cc":
-            if number == FADER_CC[layer]:
-                return "fader", layer
-            if number in ENCODER_CC[layer]:
-                n = number - ENCODER_CC[layer].start + 1
-                return f"encoder {n}", layer
-    return None
 
 
 def _ports(direction):

@@ -54,12 +54,12 @@ IF NOTHING LIGHTS AT ALL, in order of likelihood:
 import sys
 import time
 
-# The channel comes from the map in xtouch_dump.py rather than being repeated
-# here. It was repeated here once, as 0, and every LED test silently did
-# nothing for it -- the same duplication-drift that REVIEW item 16 is about,
-# committed twice in one project.
-from xtouch_dump import (CHANNEL, LED_NOTE, RING_CC, RING_CC_CANDIDATES,
-                         name_for)
+# The map comes from xtouch_constants.py rather than being repeated here. It
+# was repeated here once -- the channel, as 0 instead of 10 -- and every LED
+# test silently did nothing for a whole session. Same duplication-drift as
+# REVIEW item 16, committed twice in one project.
+from xtouch_constants import (CHANNEL, LED_NOTE, RING_CC, RING_CC_CANDIDATES,
+                              name_for)
 
 AUTO = False
 
