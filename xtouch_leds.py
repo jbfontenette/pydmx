@@ -12,6 +12,7 @@ Behringer X-Touch Mini LED output test.
     python3 xtouch_leds.py off         # everything dark
 
 Options: --auto (run on timers), --port "NAME" (pick the MIDI output).
+NOTE: --learn, --encoders and --list belong to xtouch_dump.py, not here.
 
 Like xtouch_dump.py, this assumes NOTHING. apc_leds.py can drive the APC
 because the APC's LED scheme was established first -- Note On where the
@@ -251,8 +252,12 @@ def main():
 
     unknown = [a for a in args if a.startswith("-") and a != "--auto"]
     if unknown:
+        hint = ""
+        if unknown[0] in ("--learn", "--encoders", "--list"):
+            hint = (f"\n  {unknown[0]} belongs to xtouch_dump.py, not this "
+                    f"script:\n      python3 xtouch_dump.py {unknown[0]}")
         sys.exit(f"Unknown option: {unknown[0]}\n"
-                 "  Options here are --auto and --port.")
+                 f"  Options here are --auto and --port.{hint}")
     args = [a for a in args if not a.startswith("-")]
 
     mode = args[0]
