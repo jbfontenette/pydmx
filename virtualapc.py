@@ -21,6 +21,9 @@ from surface_constants import (              # noqa: F401 -- re-exported
     GRID, TRACK_BUTTONS, SCENE_BUTTONS, SHIFT, FADER_CC,
     SOLID_10, SOLID_25, SOLID_50, SOLID_100, PULSE_4, BLINK_4, BLINK_2,
     OFF, IDLE, FEEDBACK,
+    PADS, BUTTONS, RINGS, FADERS, FADER_LAYERS, LAYERS, LAYER_NAMES,
+    LAYER_AT_START, LAYER_HINT, BUTTON_SHOWS, NAME, MAPPING_NAMES,
+    layer_index, parse_control, describe_control,
 )
 
 
@@ -40,9 +43,11 @@ class VirtualAPC:
         for payload in self.link.drain():
             kind = payload[0]
             if kind == simlink.PRESS and len(payload) >= 2:
-                events.append(("press", payload[1]))
+                events.append(("layer", 1) if payload[1] == SHIFT
+                              else ("press", payload[1]))
             elif kind == simlink.RELEASE and len(payload) >= 2:
-                events.append(("release", payload[1]))
+                events.append(("layer", 0) if payload[1] == SHIFT
+                              else ("release", payload[1]))
             elif kind == simlink.FADER and len(payload) >= 3:
                 events.append(("fader", payload[1], payload[2]))
             elif kind == simlink.INTRO and len(payload) >= 10:
@@ -139,6 +144,8 @@ class VirtualAPC:
         self.close()
 
 
-# controller.py does `apc_mod.APC()`. Aliasing here means the module itself
-# is the drop-in, so no call site needs to know which one it holds.
+# controller.py does `surface_module().Surface()`. Aliasing here means the
+# module itself is the drop-in, so no call site needs to know which one it
+# holds. APC stays as well: apcsim.py and the older tools reach for it.
+Surface = VirtualAPC
 APC = VirtualAPC

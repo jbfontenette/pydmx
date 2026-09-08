@@ -42,6 +42,7 @@ rig frozen on its last look with no input. Detect off-thread, mutate on the
 main loop.
 """
 
+import importlib
 import sys
 import threading
 import time
@@ -55,22 +56,45 @@ import showfile
 
 SHOW_DIR = "show"
 
-# Which module provides the control surface: apc (real hardware) or
-# virtualapc (apcsim.py over UDP). Resolved once in main(); every other
-# call site goes through surface_module() and never learns which it got.
+# Which module provides the control surface. Resolved once in main() from
+# --surface; every other call site goes through surface_module() and never
+# learns which it got. That is the whole point: a driver is a module with
+# the right names on it, not a branch in here.
+# Each entry is (vocabulary, driver). They are separate because --check must
+# keep working with nothing installed: the vocabulary module is pure tables
+# and parsing, while the driver imports mido and opens ports. Validating a
+# show should never need a MIDI backend, let alone a device.
+SURFACES = {
+    "apc": ("surface_constants", "apc"),        # Akai APC mini mk2
+    "apcsim": ("surface_constants", "virtualapc"),   # ...drawn by apcsim.py
+    "xtouch": ("xtouch_constants", "xtouch"),   # Behringer X-Touch Mini
+}
+
+_SURFACE = "apc"
 _SURFACE_MODULE = None
 
 
+def surface_vocab():
+    """The control vocabulary: names, ranges, parsing. No hardware, no mido.
+
+    A driver module re-exports all of it, so when one is already loaded --
+    which is how the tests inject virtualapc -- that is what comes back.
+    """
+    if _SURFACE_MODULE is not None:
+        return _SURFACE_MODULE
+    return importlib.import_module(SURFACES[_SURFACE][0])
+
+
 def surface_module():
+    """The driver. Imports mido, so only call it when opening a device."""
     global _SURFACE_MODULE
     if _SURFACE_MODULE is None:
-        import apc
-        _SURFACE_MODULE = apc
+        _SURFACE_MODULE = importlib.import_module(SURFACES[_SURFACE][1])
     return _SURFACE_MODULE
 TICK_S = 0.005          # 200Hz input poll -- well under human perception
 
 
-def build_leds(apc, show, eng, style="intensity", shift=False):
+def build_leds(surface, show, eng, style="intensity", layer=0):
     """Paint the surface to match engine state.
 
     Same colour for idle and active; only the brightness changes. That keeps
@@ -80,11 +104,24 @@ def build_leds(apc, show, eng, style="intensity", shift=False):
     'intensity' is the default: the fixed palette, 25%% when idle and 100%%
     when active. 'rgb' uses SysEx for exact 24-bit colours, but SysEx pad
     colouring is unverified on this unit -- treat it as experimental.
+
+    What gets painted comes from the surface module, not from here: PADS are
+    controls with colour and brightness, BUTTONS are binary lamps, RINGS
+    show a value. A device with no grid has PADS empty and the loop simply
+    does not run.
+
+    layer None means the surface has not said which layer it is showing --
+    the X-Touch at startup. Nothing is painted, because lighting the layer
+    that happens not to be in front of you is worse than a dark surface for
+    one gesture. Invariant 10, applied to a latching layer button.
     """
-    apc_mod = surface_module()
+    mod = surface_module()
     import colours
 
-    visible = show.layer(shift)
+    if layer is None:
+        return
+
+    visible = show.layer(layer)
 
     def is_on(binding):
         # Chasers light exactly like scenes -- is_active() covers both, so
@@ -92,54 +129,97 @@ def build_leds(apc, show, eng, style="intensity", shift=False):
         return (binding.kind in ("scene", "chaser")
                 and eng.is_active(binding.target))
 
-    if style == "rgb":
+    if style == "rgb" and mod.PADS:
         # Whole grid in two SysEx messages: blanket off, then bound pads.
-        apc.pads_rgb([(0, 63, (0, 0, 0))])
+        surface.pads_rgb([(0, 63, (0, 0, 0))])
         entries = []
         for note, binding in visible.items():
-            if note not in apc_mod.GRID:
+            if note not in mod.PADS:
                 continue
             scale = 1.0 if is_on(binding) else colours.IDLE_SCALE
             entries.append((note, note, colours.rgb(binding.colour, scale)))
-        apc.pads_rgb(entries)
-    else:
-        active_behaviour = apc_mod.FEEDBACK[style]
-        for note in apc_mod.GRID:
+        surface.pads_rgb(entries)
+    elif mod.PADS:
+        active_behaviour = mod.FEEDBACK[style]
+        for note in mod.PADS:
             binding = visible.get(note)
             if binding is None:
-                apc.pad(note, apc_mod.OFF)
+                surface.pad(note, mod.OFF)
             else:
                 index = colours.palette(binding.colour)
-                apc.pad(note, index,
-                        active_behaviour if is_on(binding) else apc_mod.IDLE)
+                surface.pad(note, index,
+                            active_behaviour if is_on(binding) else mod.IDLE)
 
-    for note in list(apc_mod.TRACK_BUTTONS) + list(apc_mod.SCENE_BUTTONS):
-        apc.button(note, 1 if visible.get(note) else 0)
+    for note in mod.BUTTONS:
+        binding = visible.get(note)
+        if binding is None:
+            surface.button(note, 0)
+        elif mod.BUTTON_SHOWS == "active":
+            # A binary lamp cannot show "bound" and "active" at once. Where
+            # the buttons ARE the surface, active is the one worth having:
+            # the layout you learn, but what is running you have to see.
+            surface.button(note, 1 if is_on(binding) else 0)
+        else:
+            surface.button(note, 1)
+
+    for number in mod.RINGS:
+        binding = show.fader_for(number, layer)
+        value = fader_value(binding, number, eng)
+        if value is not None:
+            surface.ring(number, value)
 
 
-def apply_fader(number, value, show, eng, state):
-    """Route one fader position. Shared by live moves and the startup sync.
+def fader_value(binding, number, eng):
+    """Where a continuous control should be sitting, per the engine.
+
+    None when nothing is bound, or when the binding drives something with no
+    readable position. Exists so a ring shows the SHOW's value rather than
+    the last position the user happened to turn the knob to -- which is what
+    it reverts to after a reload, or after a layer switch the device
+    remembers but the show does not.
+    """
+    if binding is None:
+        return None
+    if binding.kind == "master":
+        return round(eng.master / 255 * 127)
+    source = (eng.levels if binding.kind == "level"
+              else eng.scales if binding.kind == "scale" else None)
+    if source is None:
+        return None
+    entry = source.get((number, binding.layer))
+    return None if entry is None else round(entry[1] / 255 * 127)
+
+
+def apply_fader(number, layer, value, show, eng, state):
+    """Route one continuous control. Shared by live moves and startup sync.
 
     Which fader does what comes from mapping.csv. "Master" was never
     hardware behaviour -- CC 0x38 is an ordinary fader -- so there was no
     reason for it to be the one hardwired choice.
+
+    The engine is keyed by (number, layer), not by number. On the APC the
+    layer is always 0 and this reads as it always did, but the X-Touch's
+    encoders keep an independent value per layer, so encoder 3 on A and
+    encoder 3 on B are two controls that may drive different channels. One
+    key would silently merge them.
     """
-    binding = show.faders.get(number)
+    binding = show.fader_for(number, layer)
     if binding is None:
-        if 9 not in show.faders and number == 9:
+        if number == 9:
             eng.set_master(round(value / 127 * 255))     # legacy default
             state["master_pending"] = time.monotonic()
         return
 
+    key = (number, binding.layer)
     if binding.kind == "master":
         eng.set_master(round(value / 127 * 255))
         # A sweep is ~127 messages. Logging each one buries everything
         # else, so defer and print once the move settles.
         state["master_pending"] = time.monotonic()
     elif binding.kind == "level":
-        eng.set_level(number, binding.channels, round(value / 127 * 255))
+        eng.set_level(key, binding.channels, round(value / 127 * 255))
     elif binding.kind == "scale":
-        eng.set_scale(number, binding.channels, round(value / 127 * 255))
+        eng.set_scale(key, binding.channels, round(value / 127 * 255))
     elif binding.kind == "bpm":
         internal = state.get("internal")
         if internal is not None:
@@ -170,17 +250,21 @@ def handle(event, show, eng, log, state, actions):
 
     if kind == "fader":
         _, number, value = event
-        apply_fader(number, value, show, eng, state)
+        apply_fader(number, state["layer"] or 0, value, show, eng, state)
         return
 
     apc_mod = surface_module()
-    note = event[1]
 
-    if note == apc_mod.SHIFT:
-        # SHIFT has no LED, so the grid repainting IS the feedback.
-        state["shift"] = (kind == "press")
+    if kind == "layer":
+        # The surface reports which layer it is showing; how it decides is
+        # its own business -- the APC watches SHIFT, the X-Touch infers it
+        # from the numbers arriving, since the device never says. Neither
+        # mechanism reaches this far.
+        state["layer"] = event[1]
         state["relayout"] = True
         return
+
+    note = event[1]
 
     if kind == "release":
         # Use the binding captured at PRESS time, not a fresh lookup. If you
@@ -195,14 +279,14 @@ def handle(event, show, eng, log, state, actions):
             log(f"{binding.target} off  [{describe_active(eng)}]")
         return
 
-    binding = show.binding_for(note, state["shift"])
+    binding = show.binding_for(note, state["layer"])
     if binding is None:
         # Unmapped presses are logged deliberately. Silence here is what made
         # a missing mapping.csv look like broken MIDI.
-        row, col = divmod(note, 8)
-        where = f"r{row}c{col}" if note < 64 else f"note {note}"
-        layer = "shift+" if state["shift"] else ""
-        log(f"{layer}{where} pressed -- no binding in mapping.csv")
+        where = apc_mod.describe_control(note)
+        index = state["layer"]
+        prefix = f"{apc_mod.LAYER_NAMES[index]}+" if index else ""
+        log(f"{prefix}{where} pressed -- no binding in mapping.csv")
         return
 
     state["held"][note] = binding
@@ -343,22 +427,22 @@ def apply_reload(show, eng):
     # through the same conversion in apply_fader), so it carries across a
     # change of binding: a fader re-typed from level to scale keeps the
     # position it is physically sitting at, and only its job changes.
-    positions = {number: value for number, (_, value)
+    positions = {key: value for key, (_, value)
                  in list(eng.levels.items()) + list(eng.scales.items())}
     levels, scales = {}, {}
     unbound = []
-    for number, value in sorted(positions.items()):
-        binding = show.faders.get(number)
+    for key, value in sorted(positions.items()):
+        binding = show.faders.get(key)
         kind = binding.kind if binding else None
         if kind == "level":
-            levels[number] = (tuple(binding.channels), value)
+            levels[key] = (tuple(binding.channels), value)
         elif kind == "scale":
-            scales[number] = (tuple(binding.channels), value)
+            scales[key] = (tuple(binding.channels), value)
         else:
             # Gone from mapping.csv, re-typed to master or bpm, or dropped by
             # the loader because its glob now matches no fixture. Either way
             # it drives nothing until it is bound and moved again.
-            unbound.append(number)
+            unbound.append(key)
     # master is deliberately NOT reconciled here. It is one scalar with no
     # per-fader memory, so a fader newly typed 'master' has no unambiguous
     # claim on it, and a master that moves on its own during a reload is the
@@ -369,8 +453,11 @@ def apply_reload(show, eng):
     if dropped:
         message += f" (dropped active: {', '.join(dropped)})"
     if unbound:
-        message += (" (faders dropped: "
-                    + ", ".join(f"f{number}" for number in unbound) + ")")
+        mod = surface_module()
+        message += (" (faders dropped: " + ", ".join(
+            mod.describe_control(("fader", number)) +
+            (f"+{mod.LAYER_NAMES[lay]}" if lay else "")
+            for number, lay in unbound) + ")")
     return True, message
 
 
@@ -391,10 +478,23 @@ def main():
         except ValueError:
             sys.exit("--os2l takes an optional port number")
 
-    if use_sim:
-        global _SURFACE_MODULE
-        import virtualapc
-        _SURFACE_MODULE = virtualapc
+    global _SURFACE
+    if "--surface" in args:
+        index = args.index("--surface")
+        if index + 1 >= len(args) or args[index + 1].startswith("-"):
+            sys.exit("--surface needs a name: " + ", ".join(sorted(SURFACES)))
+        wanted = args[index + 1]
+        if wanted not in SURFACES:
+            # Loud, not clever. Guessing the device from whatever happens to
+            # be plugged in would pick the wrong one exactly when it matters:
+            # a mapping loaded against the wrong surface binds nothing, and a
+            # surface that binds nothing looks like broken MIDI.
+            sys.exit(f"unknown surface '{wanted}'. Options: "
+                     + ", ".join(sorted(SURFACES)))
+        _SURFACE = wanted
+    elif use_sim:
+        _SURFACE = "apcsim"
+    vocab = surface_vocab()
 
     monitor_spec = None
     if "--monitor" in args:
@@ -410,12 +510,14 @@ def main():
             sys.exit("--feedback needs a value: rgb, intensity, pulse, "
                      "blink or fast-blink")
         style = args[index + 1]
-        _apc_check = surface_module()
-        if style != "rgb" and style not in _apc_check.FEEDBACK:
-            sys.exit(f"unknown feedback style '{style}'. Options: rgb, "
-                     + ", ".join(_apc_check.FEEDBACK))
+        if style != "rgb" and style not in vocab.FEEDBACK:
+            # The options come from the surface, because they differ: the
+            # X-Touch's lamps are binary, so offering it 'pulse' would be a
+            # lie that only showed up as a pad that never animated.
+            sys.exit(f"unknown feedback style '{style}'. Options: "
+                     + ", ".join(vocab.FEEDBACK))
 
-    show = showfile.Show(SHOW_DIR)
+    show = showfile.Show(SHOW_DIR, surface=vocab)
     try:
         warnings = show.load()
     except (OSError, ValueError, KeyError) as exc:
@@ -430,7 +532,8 @@ def main():
     print(f"mapping: {show.mapping_path or 'NOT FOUND'}")
     synced = [n for n, c in show.chasers.items() if c.beat_synced]
     if synced:
-        tempo_pads = [k for k, b in show.faders.items() if b.kind == "bpm"]
+        tempo_pads = [n for (n, _), b in show.faders.items()
+                      if b.kind == "bpm"]
         has_tap = any(b.kind == "tap" for b in show.bindings.values())
         sources = []
         if os2l_port is not None:
@@ -442,18 +545,21 @@ def main():
         print(f"beat-synced chasers: {', '.join(synced)}")
         print(f"  tempo from: {', '.join(sources) or 'NOTHING -- they will hold'}")
     if not show.bindings:
-        print("\n  *** NO BINDINGS LOADED -- every pad press will do nothing.")
-        print("  *** mapping.csv must be in show/ or beside controller.py.\n")
+        wanted = " or ".join(vocab.MAPPING_NAMES)
+        print("\n  *** NO BINDINGS LOADED -- every press will do nothing.")
+        print(f"  *** {wanted} must be in {SHOW_DIR}/ or beside "
+              f"controller.py.\n")
     for problem in show.patch.conflicts():
         print(f"PATCH PROBLEM: {problem}")
 
     if check_only:
-        for (note, shift), b in sorted(show.bindings.items()):
-            row, col = divmod(note, 8)
-            where = (f"r{row}c{col}" if note < 64 else f"note {note}")
-            layer = "SHIFT+" if shift else "      "
-            print(f"  {layer}{where:<8} {b.mode:<7} {b.kind:<7} "
-                  f"{b.target:<14} {b.colour}")
+        width = max((len(vocab.LAYER_NAMES[i]) + 1
+                     for i in range(1, vocab.LAYERS)), default=0)
+        for (control, layer), b in sorted(show.bindings.items()):
+            where = vocab.describe_control(control)
+            prefix = f"{vocab.LAYER_NAMES[layer]}+" if layer else ""
+            print(f"  {prefix.upper():<{width}}{where:<8} {b.mode:<7} "
+                  f"{b.kind:<7} {b.target:<14} {b.colour}")
         print("\nCSVs parsed. No hardware touched.")
         return
 
@@ -504,11 +610,11 @@ def main():
     if not no_midi:
         apc_mod = surface_module()
         try:
-            surface = apc_mod.APC()
-            print(f"APC in  {surface.input_name}")
-            print(f"APC out {surface.output_name}")
+            surface = apc_mod.Surface()
+            print(f"surface in  {surface.input_name}")
+            print(f"surface out {surface.output_name}")
         except Exception as exc:
-            sys.exit(f"APC: {exc}")
+            sys.exit(f"{_SURFACE}: {exc}")
 
         # Nothing tells the host where the physical faders are sitting, so
         # without this the master sits at whatever the software assumed --
@@ -523,18 +629,21 @@ def main():
             startup = {"master_pending": None, "bpm_pending": None,
                        "internal": internal}
             for index, position in enumerate(faders):
-                apply_fader(index + 1, position, show, eng, startup)
+                apply_fader(index + 1, 0, position, show, eng, startup)
             print(f"Faders: {faders}")
-            for number in sorted(show.faders):
-                binding = show.faders[number]
+            for key in sorted(show.faders):
+                binding = show.faders[key]
                 detail = (f" ({binding.target})" if binding.target else "")
-                print(f"  f{number} {binding.kind}{detail}")
+                where = vocab.describe_control(("fader", key[0]))
+                prefix = (f"{vocab.LAYER_NAMES[key[1]]}+" if key[1] else "")
+                print(f"  {prefix}{where} {binding.kind}{detail}")
         else:
             # Fail safe, not loud: an unexpected blackout is recoverable in
             # one gesture, an unexpected full blast is not.
             eng.set_master(0)
-            print("Device did not answer the Introduction message.")
-            print("  Master starts at 0 -- move fader 9 to sync it.")
+            print("Surface did not report where its faders are sitting.")
+            print("  Master starts at 0 -- move the master control to sync"
+                  " it.")
 
     stop = threading.Event()
     with sender:
@@ -544,13 +653,13 @@ def main():
         reload_requested = threading.Event()
 
         if surface:
-            build_leds(surface, show, eng, style, False)
-            print(f"\nFeedback: {style}. Hold SHIFT for the second layer.")
+            build_leds(surface, show, eng, style, vocab.LAYER_AT_START)
+            print(f"\nFeedback: {style}. {vocab.LAYER_HINT}")
             print("Press pads. Ctrl-C to black out and exit.\n")
         else:
             print("\nNo MIDI. Ctrl-C to exit.\n")
 
-        state = {"master_pending": None, "shift": False,
+        state = {"master_pending": None, "layer": vocab.LAYER_AT_START,
                  "held": {}, "relayout": False, "flash_until": 0.0,
                  "publish_at": 0.0, "music": None,
                  "clock_source": None, "bpm_pending": None,
@@ -639,7 +748,7 @@ def main():
 
                 if state["relayout"] and surface:
                     state["relayout"] = False
-                    build_leds(surface, show, eng, style, state["shift"])
+                    build_leds(surface, show, eng, style, state["layer"])
 
                 # One clock at a time. VirtualDJ wins whenever it is
                 # actually delivering beats; the internal clock covers the
@@ -693,7 +802,7 @@ def main():
                 if eng.dirty:
                     sender.apply(eng.output())
                     if surface and not state["flash_until"]:
-                        build_leds(surface, show, eng, style, state["shift"])
+                        build_leds(surface, show, eng, style, state["layer"])
 
                 if publisher is not None:
                     # Published on a timer rather than on change, so the

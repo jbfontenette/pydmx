@@ -23,6 +23,10 @@ import re
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 
+# The default surface. Imported for its vocabulary only -- no mido, no
+# hardware -- so --check works on a machine with no MIDI backend installed.
+import surface_constants
+
 FADE = "fade"
 SNAP = "snap"
 
@@ -488,9 +492,9 @@ def load_chasers(path, scenes, warn=print):
 
 @dataclass
 class Binding:
-    """One control on the APC bound to something in the show."""
-    note: int
-    shift: bool          # True = only active while SHIFT is held
+    """One control on the surface bound to something in the show."""
+    note: int            # control id, layer-independent
+    layer: int           # which layer it lives on; 0 is the base one
     kind: str            # scene | chaser | chaser_step | tap | clear | reload
                          # on a fader: master | bpm
     target: str
@@ -499,44 +503,18 @@ class Binding:
     channels: tuple = () # for a 'level' fader: the channels it drives
 
 
-def parse_pad(token):
-    """Accept a raw note number, or friendlier position notation.
+def parse_pad(token, surface=None):
+    """A mapping.csv control token -> a control id for that surface.
 
-    12      raw note number
-    r1c4    grid row 1, column 4 -- row 0 is the BOTTOM row
-    t3      track button 3
-    s2      scene launch button 2 (s1 is the TOP one)
-    f8      fader 8 -- returns ("fader", 8), a separate key space because
-            fader CCs 48-56 would otherwise collide with grid notes 48-56
+    The vocabulary belongs to the device, not to this file: the APC's
+    r1c4/t3/s2 geometry means nothing on an X-Touch, and vice versa. Each
+    surface module owns its own parse_control; this is the seam.
+
+    Defaults to the APC so every existing caller and show reads the same as
+    it always did.
     """
-    token = token.strip().lower()
-    if token.isdigit():
-        note = int(token)
-        if not 0 <= note <= 127:
-            raise ValueError(f"note {note} out of range 0-127")
-        return note
-    if token.startswith("r") and "c" in token:
-        row, _, col = token[1:].partition("c")
-        row, col = int(row), int(col)
-        if not (0 <= row <= 7 and 0 <= col <= 7):
-            raise ValueError(f"'{token}': row and col must be 0-7")
-        return row * 8 + col
-    if token.startswith("f") and token[1:].isdigit():
-        n = int(token[1:])
-        if not 1 <= n <= 9:
-            raise ValueError(f"'{token}': faders are f1-f9")
-        return ("fader", n)
-    if token.startswith("t"):
-        n = int(token[1:])
-        if not 1 <= n <= 8:
-            raise ValueError(f"'{token}': track buttons are t1-t8")
-        return 0x64 + n - 1
-    if token.startswith("s"):
-        n = int(token[1:])
-        if not 1 <= n <= 8:
-            raise ValueError(f"'{token}': scene buttons are s1-s8")
-        return 0x70 + n - 1
-    raise ValueError(f"cannot parse pad '{token}'")
+    surface = surface or surface_constants
+    return surface.parse_control(token)
 
 
 TRUTHY = ("yes", "y", "true", "1", "shift", "x")
@@ -590,27 +568,48 @@ def _level_channels(target, patch, where, warn):
     return tuple(sorted(channels))
 
 
-def load_mapping(path, scenes, chasers=None, patch=None, warn=print):
-    """Bind APC controls to scenes, chasers and actions.
+def load_mapping(path, scenes, chasers=None, patch=None, warn=print,
+                 surface=None):
+    """Bind surface controls to scenes, chasers and actions.
 
-    Keyed by (note, shift) so SHIFT gives a second full layer -- 128 usable
-    bindings instead of 64.
+    Keyed by (control, layer), so a second layer doubles the surface: 128
+    usable bindings on the APC instead of 64, and on the X-Touch a second
+    set of 24 buttons and 9 continuous controls.
+
+    The control ids are layer-INDEPENDENT. On the X-Touch that matters: the
+    device sends different numbers per layer, and the driver translates them
+    back, so moving a binding from one layer to the other is a one-column
+    edit here rather than a renumbering.
     """
+    surface = surface or surface_constants
     chasers = chasers or {}
     bindings = {}
     faders = {}
     unknown_scenes = []
     for line_no, row in _rows(path):
         try:
-            note = parse_pad(row.get("pad", ""))
+            note = parse_pad(row.get("pad", ""), surface)
         except ValueError as exc:
             raise ValueError(f"{path} line {line_no}: {exc}")
 
-        if note == 0x7A:
-            raise ValueError(f"{path} line {line_no}: note 122 is SHIFT, the "
-                             f"modifier itself -- it cannot be bound")
+        if note == getattr(surface, "SHIFT", None):
+            raise ValueError(f"{path} line {line_no}: note {note} is SHIFT, "
+                             f"the modifier itself -- it cannot be bound")
 
-        shift = (row.get("shift") or "").strip().lower() in TRUTHY
+        # Two spellings of one idea. 'shift' is the APC's word for its held
+        # modifier and is what every existing show says; 'layer' is the
+        # general one, and the only one that can name more than a second
+        # layer or a device whose layers are latching. A row may use either.
+        raw_layer = (row.get("layer") or "").strip()
+        raw_shift = (row.get("shift") or "").strip()
+        if raw_layer and raw_shift:
+            raise ValueError(f"{path} line {line_no}: set 'layer' or "
+                             f"'shift', not both -- they mean the same thing")
+        try:
+            layer = (surface.layer_index(raw_layer) if raw_layer
+                     else int(raw_shift.lower() in TRUTHY))
+        except ValueError as exc:
+            raise ValueError(f"{path} line {line_no}: {exc}")
 
         kind = (row.get("type") or "scene").lower()
         is_fader = isinstance(note, tuple)
@@ -626,6 +625,12 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print):
             # rather than press/release. Nothing else in the row applies --
             # the APC mini mk2 faders have NO LEDs, so a colour cannot mean
             # anything, and there is no press to have a mode or a target.
+            if layer >= getattr(surface, "FADER_LAYERS", 1):
+                raise ValueError(
+                    f"{path} line {line_no}: this surface's faders have no "
+                    f"layer -- one CC whichever layer is showing, so a "
+                    f"layered fader binding could never be reached. Leave "
+                    f"the column blank.")
             channels = ()
             if kind in ("level", "scale"):
                 channels = _level_channels(row.get("target", ""), patch,
@@ -643,10 +648,14 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print):
                 warn(f"{path} line {line_no}: {', '.join(ignored)} ignored on "
                      f"a fader -- faders have no LED and no press. "
                      f"Leave those columns blank.")
-            faders[note[1]] = Binding(note[1], False, kind,
-                                      row.get("target", "")
-                                      if kind in ("level", "scale") else "",
-                                      "", "", channels)
+            key = (note[1], layer)
+            if key in faders and warn:
+                warn(f"{path} line {line_no}: "
+                     f"{surface.describe_control(note)} bound twice")
+            faders[key] = Binding(note[1], layer, kind,
+                                  row.get("target", "")
+                                  if kind in ("level", "scale") else "",
+                                  "", "", channels)
             continue
 
         target = row.get("target", "")
@@ -710,12 +719,13 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print):
         except ValueError as exc:
             raise ValueError(f"{path} line {line_no}: {exc}")
 
-        key = (note, shift)
+        key = (note, layer)
         if key in bindings and warn:
-            layer = "shift+" if shift else ""
-            warn(f"{path} line {line_no}: {layer}pad {note} bound twice "
+            where = surface.describe_control(note)
+            prefix = f"{surface.LAYER_NAMES[layer]}+" if layer else ""
+            warn(f"{path} line {line_no}: {prefix}{where} bound twice "
                  f"('{bindings[key].target}' -> '{target}')")
-        bindings[key] = Binding(note, shift, kind, target, mode, colour)
+        bindings[key] = Binding(note, layer, kind, target, mode, colour)
 
     if unknown_scenes and warn:
         lines = ", ".join(f"line {n} '{t}'" for n, t in unknown_scenes)
@@ -723,8 +733,9 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print):
              f"scenes -- SKIPPED, those pads do nothing: {lines}")
         warn(f"  scenes that do exist: {', '.join(scenes)}")
 
-    if 9 not in faders and warn:
-        warn(f"{path}: no fader bound to 'master'. Add:  f9,master")
+    if not any(b.kind == "master" for b in faders.values()) and warn:
+        warn(f"{path}: no fader bound to 'master'. Add:  "
+             f"{surface.describe_control(('fader', 9))},master")
 
     unbound = [n for n in scenes if not any(
         b.kind == "scene" and b.target == n for b in bindings.values())]
@@ -745,8 +756,13 @@ class Show:
     the behaviour you want when you are editing during a gig.
     """
 
-    def __init__(self, directory="show"):
+    def __init__(self, directory="show", surface=None):
         import os
+        # The surface decides the control vocabulary and which mapping file
+        # is read. Held rather than passed around because reload() has to
+        # parse against the same one, and a show that reloaded into a
+        # different device's dialect would be a spectacular way to fail.
+        self.surface = surface or surface_constants
         self.paths = {
             "profiles": os.path.join(directory, "profiles.csv"),
             "fixtures": os.path.join(directory, "fixtures.csv"),
@@ -758,9 +774,13 @@ class Show:
         # bindings if it was elsewhere -- pads then did nothing, with no
         # message explaining why. Never fail silently on a missing binding
         # file again: mapping_path records what was actually used.
+        # Per surface, because an APC layout and an X-Touch layout cannot
+        # be the same file: 64 pads do not fit on 16 buttons, and the
+        # vocabularies do not overlap. The APC keeps the bare name second so
+        # every existing show still loads untouched.
         self._mapping_candidates = [
-            os.path.join(directory, "mapping.csv"),
-            "mapping.csv",
+            path for name in self.surface.MAPPING_NAMES
+            for path in (os.path.join(directory, name), name)
         ]
         self.mapping_path = None
         self.profiles = {}
@@ -818,22 +838,45 @@ class Show:
         """
         return (self.stamps() if stamps is None else stamps) != self._stamps
 
-    def binding_for(self, note, shift):
+    def binding_for(self, control, layer):
         """Binding for a control, falling back to the base layer.
 
-        A shifted press with nothing bound on the shift layer falls through
-        to the unshifted binding, so SHIFT only overrides where you actually
-        defined an override.
-        """
-        return (self.bindings.get((note, True)) if shift else None) \
-            or self.bindings.get((note, False))
+        A second-layer press with nothing bound there falls through to the
+        base binding, so a layer only overrides where you actually defined
+        an override.
 
-    def layer(self, shift):
-        """{note: binding} for the layer currently visible on the grid."""
-        base = {n: b for (n, s), b in self.bindings.items() if not s}
-        if not shift:
+        layer may be None -- on a surface whose layer is unknown until the
+        first press, which is invariant 10 applied to a latching layer
+        button. Nothing resolves until the device says where it is.
+        """
+        if layer is None:
+            return None
+        return (self.bindings.get((control, layer)) if layer else None) \
+            or self.bindings.get((control, 0))
+
+    def fader_for(self, number, layer):
+        """Continuous control, with the same fall-through as binding_for.
+
+        The APC's faders are layer-less -- one CC whether or not SHIFT is
+        held -- so everything there binds at layer 0 and the fall-through is
+        what makes a press-and-hold not lose the master. On the X-Touch the
+        two layers really are different physical values the device
+        remembers, so both keys can be bound.
+        """
+        if layer is None:
+            return None
+        return (self.faders.get((number, layer)) if layer else None) \
+            or self.faders.get((number, 0))
+
+    def layer(self, index):
+        """{control: binding} for the layer currently showing."""
+        if index is None:
+            return {}
+        base = {n: b for (n, lay), b in self.bindings.items() if not lay}
+        if not index:
             return base
-        base.update({n: b for (n, s), b in self.bindings.items() if s})
+        base.update({n: b for (n, lay), b in self.bindings.items()
+                     if lay == index})
         return base
 
     def _parse(self):
@@ -849,13 +892,14 @@ class Show:
         mapping_path = self._resolve_mapping()
         if mapping_path is None:
             warnings.append(
-                "NO mapping.csv FOUND -- looked in "
-                + " and ".join(self._mapping_candidates)
-                + ". Every pad press will do nothing until it exists.")
+                f"NO MAPPING FILE FOUND for the {self.surface.NAME} surface"
+                " -- looked in " + " and ".join(self._mapping_candidates)
+                + ". Every press will do nothing until one exists.")
             bindings, faders = {}, {}
         else:
             bindings, faders = load_mapping(mapping_path, scenes, chasers,
-                                            patch, warn=warnings.append)
+                                            patch, warn=warnings.append,
+                                            surface=self.surface)
         self.mapping_path = mapping_path
         return profiles, patch, scenes, chasers, bindings, faders, warnings
 

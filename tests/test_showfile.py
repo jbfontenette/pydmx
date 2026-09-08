@@ -236,12 +236,12 @@ class TestFaderBindings(unittest.TestCase):
         self.show = helper.load_show()
 
     def test_level_resolves_glob_to_channels(self):
-        self.assertEqual(self.show.faders[1].kind, "level")
-        self.assertEqual(self.show.faders[1].channels, (1, 11))
+        self.assertEqual(self.show.fader_for(1, 0).kind, "level")
+        self.assertEqual(self.show.fader_for(1, 0).channels, (1, 11))
 
     def test_scale_resolves_the_same_way(self):
-        self.assertEqual(self.show.faders[2].kind, "scale")
-        self.assertEqual(self.show.faders[2].channels, (1, 11))
+        self.assertEqual(self.show.fader_for(2, 0).kind, "scale")
+        self.assertEqual(self.show.fader_for(2, 0).channels, (1, 11))
 
     def test_snap_feature_is_refused(self):
         # A level fader would sweep through every colour; scaling one turns

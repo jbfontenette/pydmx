@@ -18,6 +18,9 @@ from surface_constants import (              # noqa: F401 -- re-exported
     GRID, TRACK_BUTTONS, SCENE_BUTTONS, SHIFT, FADER_CC,
     SOLID_10, SOLID_25, SOLID_50, SOLID_100, PULSE_4, BLINK_4, BLINK_2,
     OFF, IDLE, FEEDBACK,
+    PADS, BUTTONS, RINGS, FADERS, FADER_LAYERS, LAYERS, LAYER_NAMES,
+    LAYER_AT_START, LAYER_HINT, BUTTON_SHOWS, NAME, MAPPING_NAMES,
+    layer_index, parse_control, describe_control,
 )
 
 
@@ -54,17 +57,26 @@ class APC:
 
     # --- input ------------------------------------------------------------
     def poll(self):
-        """Non-blocking. Yields ('press'|'release', note) and ('fader', n, v).
+        """Non-blocking. Yields ('press'|'release', control), ('fader', n, v)
+        and ('layer', index).
 
         Non-blocking on purpose: the main loop needs to keep ticking for
         chasers and LED refresh, so it must never sit waiting on MIDI.
+
+        SHIFT is reported as a LAYER change, not as a press. The controller
+        should not know which note this device's modifier is, or that it is
+        a note at all -- the X-Touch's layer button sends nothing and has to
+        be inferred from the numbers arriving instead. Same event either
+        way; only the surface knows how it decided.
         """
         events = []
         for msg in self.inp.iter_pending():
             if msg.type == "note_on" and msg.velocity > 0:
-                events.append(("press", msg.note))
+                events.append(("layer", 1) if msg.note == SHIFT
+                              else ("press", msg.note))
             elif msg.type in ("note_off", "note_on"):
-                events.append(("release", msg.note))
+                events.append(("layer", 0) if msg.note == SHIFT
+                              else ("release", msg.note))
             elif msg.type == "control_change" and msg.control in FADER_CC:
                 events.append(("fader", msg.control - 0x30 + 1, msg.value))
         return events
@@ -175,3 +187,8 @@ class APC:
 
     def __exit__(self, *exc):
         self.close()
+
+
+# controller.py builds `surface_module().Surface()`. The alias means the
+# module itself is the contract, so no call site learns which device it holds.
+Surface = APC

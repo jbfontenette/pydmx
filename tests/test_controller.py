@@ -151,12 +151,12 @@ class TestFaderReconciliation(unittest.TestCase):
         self.dir = helper.temp_show()
         self.addCleanup(shutil.rmtree, self.dir)
         self.show, self.eng = show_and_engine(self.dir)
-        self.assertEqual(self.show.faders[1].channels, (1, 11))
+        self.assertEqual(self.show.fader_for(1, 0).channels, (1, 11))
 
     def move(self, number, value):
         """Put a fader somewhere, through the path the hardware uses."""
         state = {"master_pending": None, "bpm_pending": None, "internal": None}
-        controller.apply_fader(number, value, self.show, self.eng, state)
+        controller.apply_fader(number, 0, value, self.show, self.eng, state)
 
     def repatch_par2(self, address=100):
         rewrite(self.dir, "fixtures", "fixture,profile,address\n"
@@ -169,13 +169,13 @@ class TestFaderReconciliation(unittest.TestCase):
         # until someone physically moves it, which looks exactly like the
         # re-patch having failed.
         self.move(1, 100)                       # ~201 of 255
-        value = self.eng.levels[1][1]
+        value = self.eng.levels[(1, 0)][1]
         self.repatch_par2()
 
         ok, _ = controller.apply_reload(self.show, self.eng)
 
         self.assertTrue(ok)
-        self.assertEqual(self.eng.levels[1], ((1, 100), value))
+        self.assertEqual(self.eng.levels[(1, 0)], ((1, 100), value))
         out = self.eng.output()
         self.assertEqual(out[100], value)
         self.assertNotIn(11, out)
@@ -183,12 +183,12 @@ class TestFaderReconciliation(unittest.TestCase):
     def test_scale_follows_a_repatched_fixture(self):
         self.eng.activate("warm")               # par dimmers at 255
         self.move(2, 64)                        # about half
-        half = self.eng.scales[2][1]
+        half = self.eng.scales[(2, 0)][1]
         self.repatch_par2()
 
         controller.apply_reload(self.show, self.eng)
 
-        self.assertEqual(self.eng.scales[2][0], (1, 100))
+        self.assertEqual(self.eng.scales[(2, 0)][0], (1, 100))
         out = self.eng.output()
         # 255 scaled by half/255 is half, on both channels the fader claims.
         self.assertEqual(out[1], half)
@@ -225,7 +225,7 @@ class TestFaderReconciliation(unittest.TestCase):
         # true after the binding changes job -- only what it drives changes.
         self.eng.activate("warm")
         self.move(1, 64)                        # level at ~128
-        value = self.eng.levels[1][1]
+        value = self.eng.levels[(1, 0)][1]
         rewrite(self.dir, "mapping",
                 self.MAPPING.replace("f1,level,par*.dimmer",
                                      "f1,scale,par*.dimmer"))
@@ -233,7 +233,7 @@ class TestFaderReconciliation(unittest.TestCase):
         controller.apply_reload(self.show, self.eng)
 
         self.assertNotIn(1, self.eng.levels)
-        self.assertEqual(self.eng.scales[1], ((1, 11), value))
+        self.assertEqual(self.eng.scales[(1, 0)], ((1, 11), value))
         # Scaling now, not adding: as a level fader it would have lost HTP
         # against the scene's 255 and left the output at 255.
         self.assertEqual(self.eng.output()[1], value)
@@ -404,7 +404,7 @@ class TestHeldBindingCapture(unittest.TestCase):
         self.dir = helper.temp_show(mapping=self.MAPPING)
         self.addCleanup(shutil.rmtree, self.dir)
         self.show, self.eng = show_and_engine(self.dir)
-        self.state = {"shift": False, "held": {}, "relayout": False,
+        self.state = {"layer": 0, "held": {}, "relayout": False,
                       "master_pending": None, "bpm_pending": None,
                       "flash_until": 0.0, "internal": None}
 
@@ -413,12 +413,15 @@ class TestHeldBindingCapture(unittest.TestCase):
                           lambda m: None, self.state, {})
 
     def test_releasing_shift_first_still_stops_the_right_scene(self):
-        import virtualapc
-        self.event("press", virtualapc.SHIFT)
+        # The layer arrives as an event now, not as a raw SHIFT note --
+        # apc.poll() translates, so the controller never learns which note
+        # the modifier is and the X-Touch's latching button fits the same
+        # seam. See TestSurfacePolling for the translation itself.
+        self.event("layer", 1)
         self.event("press", 0)                  # shift layer -> 'half'
         self.assertEqual(self.eng.active, [("scene", "half")])
 
-        self.event("release", virtualapc.SHIFT)  # let go of SHIFT first
+        self.event("layer", 0)                  # let go of SHIFT first
         self.event("release", 0)
 
         # 'half' was captured at press, so 'half' is what stops. A fresh
@@ -460,7 +463,7 @@ class TestFlashRelease(unittest.TestCase):
         self.dir = helper.temp_show(mapping=self.MAPPING)
         self.addCleanup(shutil.rmtree, self.dir)
         self.show, self.eng = show_and_engine(self.dir)
-        self.state = {"shift": False, "held": {}, "relayout": False,
+        self.state = {"layer": 0, "held": {}, "relayout": False,
                       "master_pending": None, "bpm_pending": None,
                       "flash_until": 0.0, "internal": None}
 
@@ -511,7 +514,7 @@ class TestReloadPadRouting(unittest.TestCase):
         note = 0x70                      # s1 in the test mapping is 'reload'
         self.assertEqual(self.show.binding_for(note, False).kind, "reload")
         seen = []
-        state = {"shift": False, "held": {}, "relayout": False,
+        state = {"layer": 0, "held": {}, "relayout": False,
                  "master_pending": None, "bpm_pending": None,
                  "flash_until": 0.0, "internal": None}
 

@@ -90,7 +90,7 @@ class TestMaster(unittest.TestCase):
 class TestFaders(unittest.TestCase):
     def setUp(self):
         self.show, self.eng = make_engine()
-        self.channels = self.show.faders[1].channels    # par*.dimmer
+        self.channels = self.show.fader_for(1, 0).channels    # par*.dimmer
 
     def test_level_fader_adds_htp(self):
         self.eng.set_level(1, self.channels, 180)
@@ -194,7 +194,7 @@ class TestSoloScope(unittest.TestCase):
     def test_solo_leaves_fader_state_alone(self):
         # Same reasoning as clear(): fader state mirrors a physical position,
         # and zeroing it would leave the software disagreeing with the desk.
-        channels = self.show.faders[1].channels
+        channels = self.show.fader_for(1, 0).channels
         self.eng.set_level(1, channels, 200)
         self.eng.solo("half")
         self.assertEqual(self.eng.output()[1], 200)

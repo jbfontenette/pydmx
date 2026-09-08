@@ -285,6 +285,14 @@ def name_for(kind, number):
 # control 10 on layer 1. mapping-xtouch.csv therefore never mentions a layer
 # B number, and moving a binding between layers is a one-column edit.
 
+NAME = "xtouch"
+
+# One name only, and deliberately not mapping.csv. An APC layout loaded here
+# would be sixteen unparseable tokens and a fatal error at startup -- which is
+# the right outcome, but a confusing way to reach it. A surface that is not
+# the default has to be given a file written for it.
+MAPPING_NAMES = ("mapping-xtouch.csv",)
+
 LAYERS = 2
 LAYER_NAMES = ("a", "b")
 
@@ -295,11 +303,24 @@ LAYER_NAMES = ("a", "b")
 # may not be the one in front of you.
 LAYER_AT_START = None
 
+# These sixteen lamps ARE the surface: there is no grid behind them. So they
+# show what is ACTIVE rather than what is bound. A binary lamp cannot do
+# both, and mid-set you need to see what is running -- the layout you learn.
+BUTTON_SHOWS = "active"
+
+LAYER_HINT = ("Press LAYER for the second layer. The surface stays dark until the\n"
+              "first press -- the device does not say which layer it is showing.")
+
 PADS = ()                       # no colour LEDs anywhere on this device
 BUTTONS = range(8, 24)          # the 16 binary lamps, layer A numbering
 PUSHES = range(0, 8)            # encoder pushes: real controls, no lamps
 RINGS = range(1, 9)             # encoder LED rings, by encoder number
 FADERS = range(1, 10)           # 8 encoders then the fader, as f9
+
+# Unlike the APC's, these really are layered: the device remembers a separate
+# position per layer for every encoder and for the fader, so there are 18
+# independent continuous controls, not 9.
+FADER_LAYERS = 2
 
 OFF = 0
 ON = 127
