@@ -338,8 +338,14 @@ def run_encoders(port_name):
 # --- guided map building --------------------------------------------------
 
 def checklist():
-    """What to ask for, in the order the prompts run."""
-    items = [f"button {n}" for n in range(1, 17)]
+    """What to ask for, in the order the prompts run.
+
+    Named the way name_for() names things, so the prompt and the echoed
+    answer speak the same language. "button 9" was ambiguous -- the whole
+    point of the walk is to remove that ambiguity, not add to it.
+    """
+    items = [f"button top {n}" for n in range(1, 9)]
+    items += [f"button bottom {n}" for n in range(1, 9)]
     items += [f"encoder {n} PUSH" for n in range(1, 9)]
     items += [f"encoder {n} turn" for n in range(1, 9)]
     items += ["fader", "layer button"]
@@ -392,6 +398,11 @@ def learn_layer(port, label):
     """
     found = {}
     print(f"\n=== layer {label} ===")
+    print("The 16 buttons are two rows of 8 below the encoders. Rows are")
+    print("counted left to right, and 'top' is the row nearer the encoders.")
+    print("Encoders are numbered left to right too. If the echoed name does")
+    print("not match the control in your hand, THAT is the finding -- the")
+    print("map's row and order are inferred, not yet confirmed.\n")
     print("Press or move each control -- what it sends is echoed as it")
     print("arrives -- then hit Enter to move on.")
     print("Blank Enter with nothing touched = skip. Ctrl-C = stop early.\n")
