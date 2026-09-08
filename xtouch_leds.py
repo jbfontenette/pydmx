@@ -166,13 +166,14 @@ def test_states(out, number):
 def test_layers(out):
     """Does an LED sent to one layer show while the other layer is active?
 
-    The device never says which layer it is on, so the controller has to
-    guess from whichever numbers last arrived -- and knows nothing at
-    startup. If lighting BOTH numbers for a control is harmless, that
-    sidesteps the whole problem for one extra message per pad. If instead
-    the wrong layer's LED bleeds through, it does not.
+    ANSWERED 2026-09-08: no, and it is not stored either. A note sent for
+    the inactive layer is discarded -- nothing lights at the time, and
+    nothing appears on switching. So the controller must send the ACTIVE
+    layer's number, and since the device never announces the layer, it has
+    to infer it from incoming notes and repaint on a change.
 
-    Watch the SAME physical button through all four steps.
+    Kept as the reproduction. Watch the SAME physical button throughout;
+    the expected answers are now yes, no, no.
     """
     a_note, b_note = 8, 32          # "button top 1" on each layer
     print(f"Sending on MIDI channel {CHANNEL}, which is where the device")

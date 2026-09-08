@@ -76,12 +76,34 @@ FADER_CC = {"A": 9, "B": 10}
 #   * The lit LAYER A / LAYER B button is the only indication of which layer
 #     is active. Nothing says so over MIDI.
 #
-# That last point has a consequence for OUTPUT that is not yet tested: to
-# light a button the controller must pick the current layer's note number,
-# and it can only infer the layer from whichever numbers last arrived -- it
-# knows nothing at startup. Lighting both numbers for a control would be
-# stateless and cost one extra message; whether that works depends on
-# whether the device keeps per-layer LED state. xtouch_leds.py layers.
+# LED OUTPUT, tested 2026-09-08 (xtouch_leds.py layers):
+#
+#   * Lighting a note works, on channel 10. Channel 0 lights nothing, which
+#     is worth stating because it looks exactly like a dead LED protocol.
+#   * A note sent for the INACTIVE layer is DISCARDED, not stored. Sending
+#     note 32 while the device is on layer A lights nothing at the time, and
+#     nothing appears when you then switch to layer B.
+#
+# So the controller cannot paint blindly: to light a button it must send the
+# ACTIVE layer's note number, and the device never says which layer that is.
+# The only source of that knowledge is input -- an arriving note below 24 is
+# layer A, 24 and above is layer B. Which means:
+#
+#   * Track a believed layer, update it from every incoming note, and on a
+#     change drop the LED cache and repaint the whole surface. That is the
+#     refresh() pattern apc.py already has, and a layer switch is a
+#     deliberate gesture rather than a per-frame event, so the cost is fine.
+#   * Painting BOTH numbers for a control does not help. The inactive one is
+#     dropped, so the other layer is still stale when it becomes active.
+#   * At startup the layer is unknown, and after a switch made without
+#     touching anything the surface stays dark until the first press tells
+#     the controller where it is. Self-correcting, but visible: a switch
+#     mid-set means one dark gesture. Invariant 10 says fail safe on unknown
+#     state, and dark-until-touched is the safe direction.
+#   * The encoder RINGS are exempt: the device drives those from its own
+#     remembered per-layer values, so they are always correct without the
+#     controller sending anything. For pan/tilt that native display is
+#     exactly what is wanted.
 #
 # Not yet confirmed: which physical control is number 1 within each block.
 # The ranges above come from pressing them in order, which is strong but is
