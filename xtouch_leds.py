@@ -14,27 +14,26 @@ Behringer X-Touch Mini LED output test.
 Options: --auto (run on timers), --port "NAME" (pick the MIDI output).
 NOTE: --learn, --encoders and --list belong to xtouch_dump.py, not here.
 
-THE DEVICE LISTENS WHERE IT SPEAKS. To light a button, send the note that
-button sends: 8-23 on layer A, 32-47 on layer B. Measured with 'scan', and
-it matters because Behringer's X-Touch Editor says something else entirely
--- notes 0-15 for the LEDs, program change for the layer, a separate
-behaviour and value CC per ring. None of that is true of this unit in
-Standard mode; all three were tested and none worked. The ranges live in
-xtouch_dump.py and are imported, so this file cannot drift from them.
+THE DEVICE LISTENS WHERE IT SPEAKS. To drive a control, send the number
+that control SENDS on the layer currently showing -- notes 8-23 and CC 1-8
+on layer A, notes 32-47 and CC 11-18 on layer B. The other layer's numbers
+are discarded, not stored. One rule, input and output, buttons and rings,
+measured on both layers.
 
-Still open, and the reason 'rings' exists: which CC block drives the encoder
-rings. CC 11-16 moved rings 1-6, but the layer A encoder CCs were only ever
-set to 1 -- a ring's minimum, indistinguishable from its resting state -- so
-that block has never really been tried.
+It matters because Behringer's X-Touch Editor says something else entirely:
+notes 0-15 for the LEDs, program change for the layer, a behaviour CC and a
+value CC per ring. None of that is true of this unit in Standard mode; all
+three were tested and none worked. The numbers live in xtouch_dump.py and
+are imported, so this file cannot drift from them.
 
 What to write down while running it:
 
-  rings   which CC moved which ring, AND which layer lamp was lit at the
-          time. Without the second half the answer is ambiguous between
-          "each layer has its own ring CCs" and "there is one ring block".
-  ring    what a value looks like -- a single dot that tracks, or a fill
-          from one end. Pan/tilt wants the first, a level the second.
+  ring    what a value DRAWS -- a single dot that tracks, or a fill from one
+          end. The style is a device-side setting per encoder per layer, set
+          in X-Touch Editor and not reachable over MIDI, so this says what
+          the unit is currently configured to show.
   states  which velocities mean off, on, and blink.
+  layers  whether a lit lamp survives a switch away and back.
 
 Run xtouch_dump.py --learn first, for the input side.
 
@@ -55,7 +54,8 @@ import time
 # here. It was repeated here once, as 0, and every LED test silently did
 # nothing for it -- the same duplication-drift that REVIEW item 16 is about,
 # committed twice in one project.
-from xtouch_dump import CHANNEL, LED_NOTE, RING_CC_CANDIDATES, name_for
+from xtouch_dump import (CHANNEL, LED_NOTE, RING_CC, RING_CC_CANDIDATES,
+                         name_for)
 
 AUTO = False
 
@@ -265,47 +265,52 @@ def test_layers(out):
 
 
 def test_rings(out):
-    """Which CC block drives the encoder rings.
+    """Which CC block drives the rings, and does it follow the layer?
 
-    The open question, and the reason this walks three blocks instead of
-    assuming one. What is known: 64 on CC 11-16 moved rings 1-6. What is
-    not: whether CC 1-8 does the same on layer A. The previous run set that
-    block to 1, which is a ring's minimum and looks exactly like its resting
-    state, so it has never actually been tried.
+    ANSWERED on 2026-09-08, on both layers: a ring listens on the CC its own
+    encoder transmits. Layer A showing, CC 1-8 move rings 1-8 and CC 11-18
+    do nothing; layer B showing, the two swap. CC 21-28 is dead either way.
+    The same rule as the buttons, which is what makes the surface one map
+    instead of two.
 
-    Two readings still fit. Either a ring answers its own encoder's
-    transmit CC -- 1-8 on layer A, 11-18 on layer B, which is how the
-    BUTTONS behave -- or there is a single ring block at 11-18 whichever
-    layer is showing. Which one holds decides whether the driver has to
-    know the layer to move a ring.
-
-    So the layer matters as much as the CC, and the test asks for it: run
-    it once on A and once on B, and note the lamp both times.
+    Kept because it is the test that answers it, and because a run on one
+    layer proves nothing -- the first attempt looked like "there is a single
+    ring block at 11-18" purely because the other block had only ever been
+    set to 1, which is a ring's minimum and indistinguishable from its
+    resting state. Everything here is set to 64 for that reason.
     """
     print("WHICH LAYER LAMP IS LIT? Write it down -- the answer is")
     print("meaningless without it. Do not press LAYER while this runs.\n")
+    print("Expected: the showing layer's block moves rings 1-8 in order,")
+    print("the other block does nothing at all.\n")
     wait("layer noted -- Enter to start")
 
     for block in RING_CC_CANDIDATES:
-        print(f"\n--- CC {block.start}-{block.stop - 1} ---")
+        owner = [layer for layer, ccs in RING_CC.items() if ccs == block]
+        label = f"layer {owner[0]} encoders" if owner else "not a ring block"
+        print(f"\n--- CC {block.start}-{block.stop - 1} ({label}) ---")
         for control in block:
             cc(out, control, 64)
             print(f"  CC {control} = 64")
             wait(f"CC {control}: which ring moved? -- Enter for next")
             cc(out, control, 0)
-    print("\nNow press LAYER and run it again. If the live block MOVES with")
-    print("the layer, rings work like buttons. If it stays put, there is one")
-    print("ring block and the driver need not know the layer to use it.")
+    print("\nRun it again on the other layer. The live block should follow.")
 
 
 def test_ring(out, control):
     """Sweep one ring CC through its values.
 
-    Takes a CC, not an encoder number: until 'rings' says which block is
-    live, an encoder does not have one CC that can be named. It is also
-    what makes the useful observation possible -- whether a value draws a
-    single dot that tracks it, or a fill from one end. Pan and tilt want the
-    dot; a level wants the fill.
+    Takes a CC rather than an encoder number because an encoder has two,
+    one per layer, and which of them is live depends on what the device is
+    showing -- naming the encoder would hide exactly the thing that has to
+    be got right.
+
+    What it is for now that the addressing is settled: seeing what a value
+    DRAWS. A single travelling dot, a fill from one end, a fan from the
+    centre. That style is configured per encoder per layer in X-Touch
+    Editor and cannot be set over MIDI, so this reports how the unit is set
+    up rather than testing the protocol. Pan and tilt want the dot; a level
+    wants the fill.
     """
     print(f"CC {control}, ramping. Watch what the ring DRAWS, not just")
     print("whether it moves: one dot, a fill, or a fan from the centre.\n")
@@ -322,14 +327,19 @@ TESTS = {
     "scan-channels": test_scan_channels,
     "rings": test_rings,
 }
-# Modes taking a number, and the range that number may take. They are not
-# the same range: 'states' names a button LED note, 'ring' a CC in one of
-# the candidate ring blocks. Accepting 0-127 for both let 'ring 16' through
-# when ring was still numbered by encoder, and it wrote to a real CC.
+def _numbers(*ranges):
+    return sorted(set().union(*(set(r) for r in ranges)))
+
+
+# Modes taking a number, and which numbers actually mean something. A range
+# is not enough: the ring CCs are 1-8 and 11-18, and 9 and 10 in the gap are
+# the FADERS. Accepting the span would let a typo move a fader instead of a
+# ring, which looks like nothing happening and reads as a dead protocol --
+# the failure this whole file exists to stop making.
 TAKES_NUMBER = {
-    "states": (test_states, LED_NOTE["A"].start, LED_NOTE["B"].stop - 1),
-    "ring": (test_ring, RING_CC_CANDIDATES[0].start,
-             RING_CC_CANDIDATES[-1].stop - 1),
+    "states": (test_states, _numbers(LED_NOTE["A"], LED_NOTE["B"]),
+               "a button LED note"),
+    "ring": (test_ring, _numbers(RING_CC["A"], RING_CC["B"]), "a ring CC"),
 }
 
 
@@ -367,21 +377,17 @@ def main():
 
     argument = None
     if mode in TAKES_NUMBER:
-        _, low, high = TAKES_NUMBER[mode]
+        _, allowed, what = TAKES_NUMBER[mode]
+        listed = ", ".join(str(n) for n in allowed)
         if len(args) < 2:
-            sys.exit(f"'{mode}' needs a number {low}-{high}: "
-                     f"python3 xtouch_leds.py {mode} {low}")
+            sys.exit(f"'{mode}' needs {what}: python3 xtouch_leds.py "
+                     f"{mode} {allowed[0]}\n  One of: {listed}")
         try:
             argument = int(args[1])
         except ValueError:
             sys.exit(f"'{args[1]}' is not a number.")
-        # Each mode has its own range, and they are not the same: 'ring'
-        # names an encoder 1-8 while 'states' names an LED note. Accepting
-        # 0-127 for both let 'ring 16' through, which sent a value to a CC
-        # that means something else entirely.
-        if not low <= argument <= high:
-            sys.exit(f"{argument} is out of range {low}-{high} for "
-                     f"'{mode}'.")
+        if argument not in allowed:
+            sys.exit(f"{argument} is not {what}.\n  One of: {listed}")
 
     port_name = port_name or find_port()
     with _open("out", port_name) as out:

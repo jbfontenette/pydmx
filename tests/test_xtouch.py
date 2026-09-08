@@ -266,16 +266,32 @@ class TestOutputMap(unittest.TestCase):
             with self.assertRaises(ValueError):
                 xtouch_dump.led_note("A", "top", index)
 
-    def test_the_ring_block_is_still_a_question(self):
-        # Recorded as candidates, not as an answer. CC 11-16 moved rings
-        # 1-6; CC 1-8 was only ever set to 1, a ring's minimum, which is
-        # indistinguishable from its resting state -- so the layer A block
-        # has never really been tried and must not be written down as dead.
+    def test_a_ring_listens_on_its_encoders_transmit_cc(self):
+        # The whole surface reduces to this: send the number the control
+        # SENDS, on the layer that is showing. Buttons and rings both.
+        for layer in ("A", "B"):
+            self.assertEqual(xtouch_dump.RING_CC[layer],
+                             xtouch_dump.ENCODER_CC[layer])
+        self.assertEqual(xtouch_dump.ring_cc("A", 1), 1)
+        self.assertEqual(xtouch_dump.ring_cc("A", 8), 8)
+        self.assertEqual(xtouch_dump.ring_cc("B", 1), 11)
+        for index in (0, 9):
+            with self.assertRaises(ValueError):
+                xtouch_dump.ring_cc("A", index)
+
+    def test_the_two_layers_do_not_share_ring_ccs(self):
+        self.assertFalse(set(xtouch_dump.RING_CC["A"]) &
+                         set(xtouch_dump.RING_CC["B"]))
+
+    def test_the_ruled_out_block_stays_in_the_walk(self):
+        # CC 21-28 moved nothing on either layer. It stays in the probe's
+        # walk anyway: eight prompts is the cheapest way to notice a
+        # firmware that moved things, and dropping it would make the next
+        # run silently narrower than the one that produced the answer.
         blocks = xtouch_dump.RING_CC_CANDIDATES
-        self.assertGreater(len(blocks), 1)
-        self.assertIn(11, blocks[1])
-        self.assertEqual(set(blocks[0]), set(xtouch_dump.ENCODER_CC["A"]))
-        self.assertEqual(set(blocks[1]), set(xtouch_dump.ENCODER_CC["B"]))
+        self.assertEqual(blocks[:2],
+                         (xtouch_dump.RING_CC["A"], xtouch_dump.RING_CC["B"]))
+        self.assertEqual(len(blocks), 3)
 
     def test_the_faders_are_not_in_any_ring_block(self):
         # The editor's "ring value CC 9-16" ran straight through both
@@ -284,17 +300,23 @@ class TestOutputMap(unittest.TestCase):
         for block in xtouch_dump.RING_CC_CANDIDATES:
             self.assertFalse(faders & set(block))
 
-    def test_the_ring_mode_takes_a_cc_from_the_candidates(self):
+    def test_the_modes_accept_the_numbers_that_mean_something(self):
         import xtouch_leds
-        low, high = xtouch_leds.TAKES_NUMBER["ring"][1:]
-        self.assertEqual(low, xtouch_dump.RING_CC_CANDIDATES[0].start)
-        self.assertEqual(high, xtouch_dump.RING_CC_CANDIDATES[-1].stop - 1)
+        allowed = {mode: set(entry[1])
+                   for mode, entry in xtouch_leds.TAKES_NUMBER.items()}
+        self.assertEqual(allowed["ring"], set(xtouch_dump.RING_CC["A"]) |
+                         set(xtouch_dump.RING_CC["B"]))
+        self.assertEqual(allowed["states"], set(xtouch_dump.LED_NOTE["A"]) |
+                         set(xtouch_dump.LED_NOTE["B"]))
 
-    def test_the_states_mode_takes_a_button_led_note(self):
+    def test_the_fader_ccs_in_the_gap_are_not_accepted_as_rings(self):
+        # 1-8 and 11-18 with the faders sitting in the hole between them. A
+        # range check would wave 9 and 10 through, and moving a fader looks
+        # exactly like nothing happening -- which is how a whole hardware
+        # session got spent on an LED protocol that was working fine.
         import xtouch_leds
-        low, high = xtouch_leds.TAKES_NUMBER["states"][1:]
-        self.assertEqual(low, xtouch_dump.LED_NOTE["A"].start)
-        self.assertEqual(high, xtouch_dump.LED_NOTE["B"].stop - 1)
+        allowed = set(xtouch_leds.TAKES_NUMBER["ring"][1])
+        self.assertFalse(set(xtouch_dump.FADER_CC.values()) & allowed)
 
 
 class TestOutputMessages(unittest.TestCase):
@@ -349,8 +371,9 @@ class TestOutputMessages(unittest.TestCase):
 
     def test_the_rings_probe_walks_every_candidate_block(self):
         # One CC at a time, each set to a value that is visibly not the
-        # resting state. Setting a ring to 1 is what made the last run
-        # unreadable: minimum and resting look identical.
+        # resting state. Setting a ring to 1 is what made one run
+        # unreadable: minimum and resting look identical, so the layer A
+        # block read as dead when it was simply at its floor.
         import xtouch_leds
         sent = self.run_with_stub(xtouch_leds.test_rings)
         lit = {m.control for m in sent

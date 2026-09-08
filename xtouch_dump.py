@@ -108,18 +108,34 @@ FADER_CC = {"A": 9, "B": 10}
 # driver. Do not re-derive the map from it -- that is how the two measured
 # facts at the bottom of this comment came to be doubted for a day.
 #
-# RINGS are only half measured. Sending 64 to CC 11-16 moved the rings of
-# encoders 1-6, one for one. CC 1-8 was set to 1 in the same pass, which is
-# a ring's MINIMUM and looks exactly like the resting state, so that block
-# is still untested at any value that would show. Two readings fit:
+# RINGS answer their own encoder's transmit CC, per layer, exactly as the
+# buttons do. Measured on both layers, 2026-09-08:
 #
-#   a) a ring is addressed by its encoder's own transmit CC -- 1-8 on layer
-#      A, 11-18 on layer B. Consistent with the buttons, and it would mean
-#      the device was on layer B during that test.
-#   b) the ring block is CC 11-18 whichever layer is showing.
+#     layer A showing   CC 1-8 move rings 1-8; CC 11-18 do nothing
+#     layer B showing   CC 11-18 move rings 1-8; CC 1-8 do nothing
 #
-# They differ for the driver, so xtouch_leds.py rings now walks CC 1-8,
-# 11-18 and 21-28 at a visible value and asks which layer lamp is lit.
+# CC 21-28 does nothing on either layer, so the "transmit CC plus ten" guess
+# is dead. There is no separate behaviour CC: the value is the whole message.
+#
+# So ONE RULE covers the whole surface, input and output, buttons and rings:
+#
+#     to drive a control, send the number that control SENDS on the layer
+#     that is currently showing; the other layer's numbers are discarded.
+#
+# Which is why the layer has to be tracked -- see LAYER, below. It is the
+# single fact the driver cannot do without.
+#
+# The RING DISPLAY STYLE is a device-side setting, not a MIDI one. The same
+# value drew differently on layer A and layer B on this unit, and nothing in
+# the CC selects that -- it is per encoder, per layer, and set in X-Touch
+# Editor. So the controller chooses a ring's VALUE and the editor chooses
+# how it is drawn; a pan/tilt encoder wanting a single travelling dot and a
+# level wanting a fill have to be configured on the device beforehand.
+#
+# Rings also keep per-layer state, visibly: layer A's rings sat at their
+# first LED at rest while layer B's sat dark. Same knobs, two remembered
+# positions, which matches the encoders sending independent values per
+# layer.
 #
 # LED OUTPUT, tested 2026-09-08 (xtouch_leds.py layers):
 #
@@ -147,10 +163,13 @@ FADER_CC = {"A": 9, "B": 10}
 #     the controller where it is. Self-correcting, but visible: a switch
 #     mid-set means one dark gesture. Invariant 10 says fail safe on unknown
 #     state, and dark-until-touched is the safe direction.
-#   * The encoder RINGS are exempt: the device drives those from its own
-#     remembered per-layer values, so they are always correct without the
-#     controller sending anything. For pan/tilt that native display is
-#     exactly what is wanted.
+#   * The encoder RINGS need no painting to stay right: the device drives
+#     them from its own remembered per-layer values, so a knob the user
+#     turns always reads correctly with the controller sending nothing. For
+#     pan/tilt that native display is exactly what is wanted. They are NOT
+#     exempt from the layer rule, though -- when the controller does drive a
+#     ring, to show a value the software owns rather than one the user
+#     turned, it must use the showing layer's CC like everything else.
 #
 # CONFIRMED control by control with --learn on 2026-09-08. Every inference
 # above held: the row nearer the encoders is notes 8-15, both rows and the
@@ -207,11 +226,22 @@ FADER_CC = {"A": 9, "B": 10}
 LED_NOTE = {layer: range(BUTTONS_TOP[layer].start, BUTTONS_BOTTOM[layer].stop)
             for layer in ("A", "B")}
 
-# UNRESOLVED, see the ring note above. Candidate blocks for the ring value,
-# in the order xtouch_leds.py rings walks them: the layer A encoder CCs, the
-# layer B encoder CCs, and one block further on in case the pattern is
-# "transmit CC plus ten".
-RING_CC_CANDIDATES = (range(1, 9), range(11, 19), range(21, 29))
+# A ring listens on the CC its encoder transmits, so this is an alias of the
+# input map rather than a second one. Named separately all the same, because
+# a call site setting a ring should not read as one reading an encoder.
+RING_CC = ENCODER_CC
+
+# What xtouch_leds.py rings walks. The third block is kept in the walk after
+# being ruled out: it costs eight prompts and it is the cheapest way to
+# notice a firmware that moved things.
+RING_CC_CANDIDATES = (ENCODER_CC["A"], ENCODER_CC["B"], range(21, 29))
+
+
+def ring_cc(layer, index):
+    """CC that drives one encoder's LED ring. index is 1-8."""
+    if not 1 <= index <= 8:
+        raise ValueError(f"encoder {index} is out of range 1-8")
+    return RING_CC[layer][index - 1]
 
 
 def led_note(layer, row, index):
