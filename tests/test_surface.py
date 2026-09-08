@@ -535,3 +535,110 @@ class TestFaderLayers(unittest.TestCase):
         # device is showing b -- the fall-through that stops a layer switch
         # taking the master away.
         self.assertEqual(self.show.fader_for(9, 1).kind, "master")
+
+
+class TestPaintingAnXTouchLayout(unittest.TestCase):
+    """build_leds against a real X-Touch mapping, through the surface API.
+
+    The unit tests above check each piece; this checks that controller.py
+    asks for the right things. It is the seam where a surface with no grid
+    and a surface with no rings both have to work, and where the wrong
+    answer is silence rather than an exception.
+    """
+
+    MAPPING = ("pad,type,target,mode,layer\n"
+               "bt1,scene,warm,toggle,a\n"
+               "bt2,scene,half,toggle,a\n"
+               "bt1,scene,half,toggle,b\n"
+               "p1,clear,,,a\n"
+               "e1,level,par*.dimmer,,a\n"
+               "f1,master,,,a\n")
+
+    class Recorder:
+        """A surface that records what it was asked to paint."""
+
+        def __init__(self):
+            self.buttons = {}
+            self.rings = {}
+            self.pads = []
+
+        def button(self, control, state=1, force=False):
+            self.buttons[control] = state
+
+        def ring(self, number, value, force=False):
+            self.rings[number] = value
+
+        def pad(self, *args, **kwargs):
+            self.pads.append(args)
+
+    def setUp(self):
+        import os
+        import engine as engine_mod
+        self.path = helper.temp_show(mapping="")
+        self.addCleanup(shutil.rmtree, self.path)
+        with open(os.path.join(self.path, "mapping-xtouch.csv"), "w") as f:
+            f.write(self.MAPPING)
+        self.show = showfile.Show(self.path, surface=xtouch_constants)
+        self.show.load()
+        self.eng = engine_mod.Engine(self.show.patch, self.show.scenes,
+                                     self.show.chasers)
+        self.previous = controller._SURFACE_MODULE
+        controller._SURFACE_MODULE = xtouch_constants
+        self.addCleanup(setattr, controller, "_SURFACE_MODULE", self.previous)
+
+    def paint(self, layer):
+        surface = self.Recorder()
+        controller.build_leds(surface, self.show, self.eng, "intensity", layer)
+        return surface
+
+    def test_no_colour_pads_are_ever_asked_for(self):
+        # PADS is empty, so the pad loop must not run at all -- xtouch.pad()
+        # raises, deliberately, and reaching it would take the show down.
+        self.assertEqual(self.paint(0).pads, [])
+
+    def test_an_unknown_layer_paints_nothing(self):
+        surface = self.paint(None)
+        self.assertEqual(surface.buttons, {})
+        self.assertEqual(surface.rings, {})
+
+    def test_bound_buttons_are_dark_until_their_target_is_active(self):
+        # BUTTON_SHOWS is "active" here: a binary lamp cannot say "bound"
+        # and "running" at once, and running is the half worth seeing.
+        surface = self.paint(0)
+        self.assertEqual(surface.buttons[8], 0)
+        self.eng.activate("warm")
+        self.assertEqual(self.paint(0).buttons[8], 1)
+
+    def test_every_button_is_painted_including_the_unbound_ones(self):
+        # Unbound must be explicitly dark, not merely unmentioned: the
+        # device remembers whatever it was last told.
+        surface = self.paint(0)
+        self.assertEqual(set(surface.buttons), set(xtouch_constants.BUTTONS))
+
+    def test_the_other_layer_is_not_painted(self):
+        self.eng.activate("half")
+        # bt1 on layer b is 'half'; on layer a it is 'warm'.
+        self.assertEqual(self.paint(1).buttons[8], 1)
+        self.assertEqual(self.paint(0).buttons[8], 0)
+
+    def test_a_level_encoder_shows_the_engine_s_value_not_the_knob_s(self):
+        # The point of ring feedback: after a reload the device still holds
+        # wherever the knob was turned, and the show may disagree.
+        binding = self.show.fader_for(1, 0)
+        self.eng.set_level((1, 0), binding.channels, 255)
+        self.assertEqual(self.paint(0).rings[1], 127)
+
+    def test_an_unbound_encoder_ring_is_left_alone(self):
+        # Not zeroed: the device drives its own rings when the user turns
+        # them, and blanking one every repaint would fight the hardware.
+        self.assertNotIn(2, self.paint(0).rings)
+
+    def test_the_master_encoder_would_show_the_master(self):
+        # f1 is the fader, not a ring, so nothing is painted for it here --
+        # but fader_value must still answer, since which controls have rings
+        # is the surface's business and another device may differ.
+        binding = self.show.fader_for(9, 0)
+        self.eng.set_master(255)
+        self.assertEqual(controller.fader_value(binding, 9, self.eng), 127)
+        self.eng.set_master(0)
+        self.assertEqual(controller.fader_value(binding, 9, self.eng), 0)
