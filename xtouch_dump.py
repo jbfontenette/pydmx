@@ -64,6 +64,25 @@ BUTTONS_BOTTOM = {"A": range(16, 24), "B": range(40, 48)}
 ENCODER_CC = {"A": range(1, 9), "B": range(11, 19)}
 FADER_CC = {"A": 9, "B": 10}
 
+# From photographs of the device, 2026-09-08:
+#
+#   * MC MODE is OFF. That is what makes the encoders absolute -- the same
+#     unit in Mackie Control mode would send relative deltas instead, and
+#     the whole encoder binding design would change. Worth checking that
+#     button before believing anything here.
+#   * Each layer keeps its OWN encoder positions. The same physical knobs
+#     show different ring values on A and B, so there are effectively 16
+#     independent absolute encoders, not 8, each remembered by the device.
+#   * The lit LAYER A / LAYER B button is the only indication of which layer
+#     is active. Nothing says so over MIDI.
+#
+# That last point has a consequence for OUTPUT that is not yet tested: to
+# light a button the controller must pick the current layer's note number,
+# and it can only infer the layer from whichever numbers last arrived -- it
+# knows nothing at startup. Lighting both numbers for a control would be
+# stateless and cost one extra message; whether that works depends on
+# whether the device keeps per-layer LED state. xtouch_leds.py layers.
+#
 # Not yet confirmed: which physical control is number 1 within each block.
 # The ranges above come from pressing them in order, which is strong but is
 # not the same as labelling each one. --learn is what settles it.

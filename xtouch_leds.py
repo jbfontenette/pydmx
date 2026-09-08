@@ -5,6 +5,7 @@ Behringer X-Touch Mini LED output test.
     pip install mido python-rtmidi
 
     python3 xtouch_leds.py scan        # walk the note range, find the buttons
+    python3 xtouch_leds.py layers      # does an LED reach the inactive layer?
     python3 xtouch_leds.py states 8    # what velocities does note 8 accept?
     python3 xtouch_leds.py rings       # walk the CC range, find the LED rings
     python3 xtouch_leds.py ring 1      # sweep every value on CC 1
@@ -144,6 +145,40 @@ def test_states(out, number):
     note(out, number, 0)
 
 
+def test_layers(out):
+    """Does an LED sent to one layer show while the other layer is active?
+
+    The device never says which layer it is on, so the controller has to
+    guess from whichever numbers last arrived -- and knows nothing at
+    startup. If lighting BOTH numbers for a control is harmless, that
+    sidesteps the whole problem for one extra message per pad. If instead
+    the wrong layer's LED bleeds through, it does not.
+
+    Watch the SAME physical button through all four steps.
+    """
+    a_note, b_note = 8, 32          # "button top 1" on each layer
+    print("Put the device on LAYER A and watch the top-left button.\n")
+    wait("on layer A, Enter to light the layer A note")
+
+    note(out, a_note, 127)
+    print(f"  note {a_note} (layer A) lit -- is the button on?")
+    wait("Enter")
+    note(out, a_note, 0)
+
+    note(out, b_note, 127)
+    print(f"  note {b_note} (layer B) lit -- while still on layer A.")
+    print("  Does anything light? It should NOT, if state is per layer.")
+    wait("Enter")
+
+    print("\n  Now switch to LAYER B, leaving that note lit.")
+    wait("switched to B, Enter")
+    print(f"  note {b_note} was set while you were on A. Is it lit now?")
+    print("  If yes, the device holds per-layer LED state and the controller")
+    print("  can light both numbers blindly. If no, it must track the layer.")
+    wait("Enter")
+    note(out, b_note, 0)
+
+
 def test_rings(out):
     """Which CC drives which encoder ring."""
     print("Setting one CC at a time to a mid value. Note which ring lights.\n")
@@ -166,6 +201,7 @@ def test_ring(out, control):
 
 
 TESTS = {
+    "layers": test_layers,
     "scan": test_scan,
     "scan-channels": test_scan_channels,
     "rings": test_rings,
