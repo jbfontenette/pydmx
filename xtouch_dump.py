@@ -164,6 +164,18 @@ def classify_encoder(values):
             "binary offset: 65+ is one way, 63- is the other, and 64 means "
             "no movement.")
 
+    # A partial turn: not the full sweep the first test wants, but plainly a
+    # position all the same -- many distinct values, each visited about once.
+    # A relative encoder cannot look like this however far it turns, because
+    # it only ever has a handful of values to send.
+    if len(distinct) > 8 and repeats < 2 and span > 15:
+        return "absolute", (
+            f"{len(distinct)} distinct values over {distinct[0]}.."
+            f"{distinct[-1]}, barely repeating. That is a position being "
+            f"reported, not steps -- so it can reuse apply_fader() in "
+            f"controller.py unchanged. Turn it end to end to see the full "
+            f"0-127 range.")
+
     if repeats < 1.5 and len(distinct) >= 6:
         return "absolute", (
             f"Values barely repeat ({len(values)} messages, "

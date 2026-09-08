@@ -47,6 +47,34 @@ class TestEncoderClassification(unittest.TestCase):
         self.assertEqual(verdict([60, 61, 62, 63, 64, 65, 66, 67]),
                          "absolute")
 
+    def test_real_x_touch_mini_captures_read_as_absolute(self):
+        """Actual data off an X-Touch Mini, 2026-09-08.
+
+        Kept verbatim because it is the only ground truth this project has
+        for the device: the encoders report a POSITION, saturating at 0 and
+        sweeping to 127, which is what Standard mode does. CC 3 is the case
+        that mattered -- a partial turn of ~30 values, which the first
+        version of this classifier shrugged at and called unknown. A slow
+        careful turn is exactly how someone would test an encoder, so
+        shrugging at it was the wrong answer to the most likely input.
+        """
+        cc1 = [1, 4, 8, 13, 18, 23, 29, 34, 39, 42, 45, 44, 39, 34, 29, 24,
+               19, 14, 9, 5, 2, 0, 2]
+        cc3 = [1, 4, 7, 11, 12, 15, 19, 22, 23, 26, 25, 22, 19, 16, 15, 12,
+               11, 10, 11, 14, 17, 20, 23, 24, 26, 27, 28, 31, 30, 26, 22,
+               18, 15]
+        cc4 = [0, 0, 0, 0, 0, 0, 0, 0, 1, 4, 7, 10, 13, 16, 19, 22, 25, 26,
+               29, 31, 32, 35, 37, 38, 41, 44, 47, 50, 51, 54, 57, 60, 63,
+               66, 67, 70, 73, 74, 73, 70, 71, 74, 77, 80, 83, 82, 81, 78,
+               75, 71, 69, 68, 67, 64, 63]
+        for name, values in (("cc1", cc1), ("cc3", cc3), ("cc4", cc4)):
+            self.assertEqual(verdict(values), "absolute", name)
+
+    def test_the_real_fader_sweep_reads_as_absolute(self):
+        # CC 9, the fader, end to end. Every single value, no gaps.
+        self.assertEqual(verdict(list(range(8, 128)) + list(range(126, -1, -1))),
+                         "absolute")
+
     def test_too_little_movement_admits_it(self):
         self.assertEqual(verdict([64, 65]), "unknown")
         self.assertIn("turn it more",
