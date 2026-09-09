@@ -205,17 +205,28 @@ def fader_value(binding, number, eng):
     the last position the user happened to turn the knob to -- which is what
     it reverts to after a reload, or after a layer switch the device
     remembers but the show does not.
+
+    An UNSET level or scale answers with its neutral value rather than None,
+    and that is the whole cure for the startup jump. A level with no entry
+    contributes nothing and a scale with no entry attenuates nothing, so 0
+    and full ARE the values in force -- saying so is simply truthful. It
+    matters because writing a ring on the X-Touch moves the ENCODER, not
+    just its lamps (measured), so the knob physically starts where the show
+    is. Without it, a scale encoder resting at zero would slam a group from
+    full to nothing on the first touch, which is exactly what happened.
     """
     if binding is None:
         return None
     if binding.kind == "master":
         return round(eng.master / 255 * 127)
-    source = (eng.levels if binding.kind == "level"
-              else eng.scales if binding.kind == "scale" else None)
-    if source is None:
+    if binding.kind == "level":
+        source, neutral = eng.levels, 0
+    elif binding.kind == "scale":
+        source, neutral = eng.scales, 255
+    else:
         return None
     entry = source.get((number, binding.layer))
-    return None if entry is None else round(entry[1] / 255 * 127)
+    return round((neutral if entry is None else entry[1]) / 255 * 127)
 
 
 def apply_fader(number, layer, value, show, eng, state):

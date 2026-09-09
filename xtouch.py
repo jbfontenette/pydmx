@@ -188,10 +188,17 @@ class XTouch:
     def ring(self, number, value, force=False):
         """Set an encoder's LED ring to a value 0-127.
 
+        THIS ALSO MOVES THE ENCODER. Measured: with the knob at 7, setting
+        the ring to 110 made the next click report 111. So this is not only
+        a display -- it is the one way to tell this device where a control
+        should be sitting, and the cure for the startup jump. There is no
+        Introduction message here to ask with, but painting a bound encoder
+        with the show's value puts the knob physically where the show is.
+
         The device drives the ring itself when the user turns the knob, so
-        this is only for values the SOFTWARE owns -- after a reload, or on a
-        layer switch, where the device's remembered position and the show's
-        value have no reason to agree.
+        the rest of the time this is for values the SOFTWARE owns -- after a
+        reload, or on a layer switch, where the device's remembered position
+        and the show's value have no reason to agree.
 
         How the value is DRAWN -- a travelling dot, a fill from one end, a
         fan from the centre -- is a device-side setting per encoder per

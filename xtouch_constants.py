@@ -116,6 +116,18 @@ FADER_CC = {"A": 9, "B": 10}
 # positions, which matches the encoders sending independent values per
 # layer.
 #
+# WRITING A RING MOVES THE ENCODER, not just its lamps. Measured: with the
+# knob sitting at 7, CC 1 was set to 110, and the next click right reported
+# 111. So the host can PUT an encoder where it wants it.
+#
+# That is what cures the startup jump. This device has no Introduction
+# message -- there is no asking it where its encoders are sitting, the way
+# the APC can be asked -- so the controller starts blind, and a `scale`
+# encoder resting at zero would slam its group from full to nothing on the
+# first touch. It cannot be read, but it CAN be written: paint every bound
+# encoder with the value the show implies and the knob physically starts
+# where the show is. introduce() inverted.
+#
 # LED OUTPUT, tested 2026-09-08 (xtouch_leds.py layers):
 #
 #   * Lighting a note works, on channel 10. Channel 0 lights nothing, which

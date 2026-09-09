@@ -867,6 +867,33 @@ class TestPaintingAnXTouchLayout(unittest.TestCase):
         # them, and blanking one every repaint would fight the hardware.
         self.assertNotIn(2, self.paint(0).rings)
 
+    def test_an_unset_scale_encoder_starts_at_full(self):
+        # THE STARTUP JUMP, cured. A scale with no entry attenuates nothing,
+        # so full is the value in force. Writing the ring moves the ENCODER
+        # on this device, so the knob physically starts at the top and
+        # turning it down attenuates smoothly. Left at None the knob would
+        # sit wherever it was, and the first touch would slam the group from
+        # full to nothing.
+        import os
+        with open(os.path.join(self.path, "mapping-xtouch.csv"), "a") as f:
+            f.write("e5,scale,par*.dimmer,,a\n")
+        self.show.reload()
+        self.assertEqual(self.paint(0).rings[5], 127)
+
+    def test_an_unset_level_encoder_starts_at_zero(self):
+        # The other neutral: a level with no entry adds nothing, and HTP
+        # means starting low is also the safe direction.
+        import os
+        with open(os.path.join(self.path, "mapping-xtouch.csv"), "a") as f:
+            f.write("e6,level,par*.dimmer,,a\n")
+        self.show.reload()
+        self.assertEqual(self.paint(0).rings[6], 0)
+
+    def test_once_moved_the_ring_follows_the_engine_not_the_neutral(self):
+        binding = self.show.fader_for(1, 0)
+        self.eng.set_level((1, 0), binding.channels, 64)
+        self.assertEqual(self.paint(0).rings[1], 32)
+
     def test_the_master_encoder_would_show_the_master(self):
         # f1 is the fader, not a ring, so nothing is painted for it here --
         # but fader_value must still answer, since which controls have rings

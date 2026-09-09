@@ -157,6 +157,14 @@ without re-testing on hardware will regress things that took a while to find.
   in software here: `SOFT_BLINK` on a surface module says which styles the
   main loop animates itself, and the phase is derived from the clock rather
   than counted, for the same reason as invariant 4.
+- **Writing an X-Touch ring MOVES that encoder**, not just its lamps.
+  Measured: knob at 7, ring set to 110, next click reported 111. There is no
+  Introduction message on this device, so its encoder positions cannot be
+  READ -- but they can be written, which is what cures the startup jump. A
+  `scale` encoder resting at zero would otherwise slam its group from full
+  to nothing on first touch. `controller.fader_value` answers with the
+  neutral value for an unset level or scale precisely so the first paint
+  puts every bound knob where the show already is: `introduce()` inverted.
 - **The X-Touch changes its own lamps and rings.** A button lights while held
   and goes dark on release whatever the host set, and a ring follows its knob
   as you turn it. So a diff-based LED cache goes stale on every press and

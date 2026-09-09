@@ -295,6 +295,14 @@ than showing wherever the knob was last turned. **How** the ring draws that
 value — a travelling dot, a fill from one end — is set per encoder per layer
 in Behringer's X-Touch Editor and cannot be changed over MIDI.
 
+Writing a ring also *moves the encoder*, which is what stops the first touch
+of a knob jumping. The device cannot be asked where its encoders are sitting
+— it has no equivalent of the APC's Introduction message — so instead the
+controller puts them where the show already is: an unset `scale` starts at
+full, an unset `level` at zero. Turning one from there is smooth. The one
+case left is turning an encoder as the *very first* thing after startup,
+before any press has revealed which layer is showing; one press fixes it.
+
 > The device must be in **Standard mode**, not MC MODE. MC MODE changes every
 > number on the device and makes the encoders send relative deltas instead of
 > positions.
