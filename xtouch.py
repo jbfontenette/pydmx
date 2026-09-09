@@ -18,16 +18,19 @@ the manufacturer's own documentation says instead.
 2. THE DEVICE NEVER SAYS WHICH LAYER IT IS SHOWING. The layer button sends
    nothing at all, and program change does not move it either. The only
    evidence is the numbers that arrive, so the layer is inferred from them
-   and reported as a ('layer', index) event. Until the first press the layer
-   is UNKNOWN, and nothing is painted -- invariant 10, applied to a latching
-   switch. Lighting the layer that happens not to be in front of you is worse
-   than a dark surface for one gesture.
+   and reported as a ('layer', index) event -- and that inference is needed
+   only for INPUT, to decide which binding a press fires. Painting does not
+   need it: both layers are painted every time and the device keeps the one
+   that matters, which is what makes the surface right at startup rather
+   than dark, and right again after a switch made by hand.
 
 3. THE DEVICE REMEMBERS EACH LAYER SEPARATELY. Switch away and back and the
-   lamps are as you left them. So the LED cache is per layer and stays valid
-   across a switch -- there is nothing to invalidate, because a hidden layer
-   is never written to. This is why there is no repaint-on-switch here: that
+   lamps are as you left them, so there is no repaint-on-switch here -- that
    would be sixteen wasted messages for a picture the device already has.
+   The cache is per layer for the same reason, and a write aimed at the
+   layer NOT showing is never cached, because the device discards it and
+   believing otherwise would suppress the re-send that keeps the surface
+   honest.
 
 Button LEDs are BINARY -- velocity 0 off, every value 1-127 plain on, with no
 brightness step and no blink anywhere in the range. The APC's idle-glow

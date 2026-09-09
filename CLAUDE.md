@@ -15,7 +15,7 @@ against the code that exists, and which invariants it puts at risk.
 ## Before you start
 
 ```bash
-python3 -m unittest discover -s tests -t tests      # 281 tests, ~0.7s
+python3 -m unittest discover -s tests -t tests      # 288 tests, ~0.7s
 python3 controller.py --check                        # validate CSVs
 ```
 
@@ -110,11 +110,13 @@ surface's business.** A HELD modifier falls through -- losing every pad for
 as long as SHIFT is down would be absurd. A LATCHING layer does not: it is a
 page you stay on, and inheriting the other page wherever it is blank fires
 the wrong thing. `LAYER_FALLS_THROUGH` says which, and `Show.layer()` must
-agree with `binding_for()` or a lamp advertises a binding that does nothing. Which physical numbers a layer uses is the surface's
-business alone. The X-Touch sends different notes and CCs per layer and its
-driver translates both ways, so `mapping-xtouch.csv` never mentions a layer B
-number and moving a binding between layers is a one-column edit. Anything in
-`controller.py` that learns a raw MIDI number has broken this.
+agree with `binding_for()` or a lamp advertises a binding that does nothing.
+
+Which physical numbers a layer uses is the surface's business alone. The
+X-Touch sends different notes and CCs per layer and its driver translates
+both ways, so `mapping-xtouch.csv` never mentions a layer B number and moving
+a binding between layers is a one-column edit. Anything in `controller.py`
+that learns a raw MIDI number has broken this.
 
 ## Error policy
 

@@ -144,38 +144,42 @@ FADER_CC = {"A": 9, "B": 10}
 # holds two independent LED surfaces and shows one of them; what it never
 # does is accept a write to the one it is not showing.
 #
-# That is the better of the two possible answers, and it decides the paint
-# policy:
+# That decides the paint policy, and the FIRST conclusion drawn from it was
+# wrong. It read: keep a desired and a delivered state per layer, write only
+# to the layer showing, and flush the difference when a layer appears. All
+# true, all sound, and it left the surface dark at startup and stale after a
+# switch made by hand -- because every one of those steps needs to know
+# which layer is showing, and this device never says.
 #
-#   * Keep a DESIRED state and a DELIVERED state per layer. While a layer is
-#     hidden, update desired only -- sending is pointless, the write is
-#     dropped. On a layer change, flush the difference for the layer that
-#     just appeared. At most sixteen notes, and usually none.
-#   * Do NOT drop the whole cache and repaint on a switch. That was the plan
-#     when the device was assumed to forget; it would now send sixteen
-#     redundant messages per switch for nothing. The cache stays valid
-#     precisely because we never write to a hidden layer.
-#   * Painting BOTH numbers for a control still does not help. The inactive
-#     write is dropped at the moment it is made, not stored for later.
+# The right conclusion from the same measurement:
 #
-# The layer must still be TRACKED, and input is the only source: the device
-# never announces a switch, and program change does not cause one. An
-# arriving note below 24 means layer A, 24 and above means layer B.
+#   * PAINT EVERY LAYER, EVERY TIME. Send both pictures; the device keeps
+#     the one that matters and drops the other. The layer then does not have
+#     to be known in order to paint correctly, which is what makes the
+#     surface right at startup and right again after a manual switch. The
+#     earlier note here said "painting BOTH numbers for a control does not
+#     help" -- true of what it was aimed at, since the dropped write is not
+#     stored for later, and beside the point: the value is in the write that
+#     LANDS, not the one that is dropped.
+#   * A write to a hidden layer cannot be CACHED, precisely because it is
+#     discarded. Believing it landed would suppress the re-send that is the
+#     whole mechanism. The showing layer stays diffed and cheap; the other
+#     one is unconditional.
+#   * Do NOT drop the cache and repaint on a switch. The device remembers,
+#     so a blanket repaint would be sixteen redundant messages for a picture
+#     it already has -- and painting every layer anyway makes it moot.
 #
-#   * At startup the layer is unknown. Invariant 10 says fail safe on
-#     unknown state: paint nothing until the first press says where we are,
-#     rather than guessing A and lighting a surface that may not be showing.
-#   * After a switch made without touching anything, the surface is not
-#     dark -- it shows whatever that layer was last told, which may be
-#     stale. Self-correcting on the first press, and one gesture is the
-#     whole cost.
+# The layer must still be TRACKED, but only for INPUT -- which binding a
+# press fires. The device never announces a switch and program change does
+# not cause one, so an arriving note below 24 means layer A and 24 or above
+# means layer B, and that is the only thing the layer is needed for.
+#
 #   * The encoder RINGS need no painting to stay right: the device drives
 #     them from its own remembered per-layer values, so a knob the user
 #     turns always reads correctly with the controller sending nothing. For
-#     pan/tilt that native display is exactly what is wanted. They are NOT
-#     exempt from the layer rule, though -- when the controller does drive a
-#     ring, to show a value the software owns rather than one the user
-#     turned, it must use the showing layer's CC like everything else.
+#     pan/tilt that native display is exactly what is wanted. They are still
+#     painted per layer like everything else, which is what puts a knob
+#     where the show is at startup -- see the ring/encoder note above.
 #
 # CONFIRMED control by control with --learn on 2026-09-08. Every inference
 # above held: the row nearer the encoders is notes 8-15, both rows and the
@@ -337,8 +341,8 @@ PAINT_HIDDEN_LAYERS = True
 # both, and mid-set you need to see what is running -- the layout you learn.
 BUTTON_SHOWS = "active"
 
-LAYER_HINT = ("Press LAYER for the second layer. The surface stays dark until the\n"
-              "first press -- the device does not say which layer it is showing.")
+LAYER_HINT = ("Press LAYER for the second layer. Both layers are painted every\n"
+              "time, so the lamps are right whichever one you are on.")
 
 PADS = ()                       # no colour LEDs anywhere on this device
 BUTTONS = range(8, 24)          # the 16 binary lamps, layer A numbering
