@@ -1,53 +1,3 @@
-def test_seed(out, index):
-    """Does writing a ring also set the encoder's POSITION, or only its lamps?
-
-    THE QUESTION THIS ANSWERS is what to do about the startup jump. The
-    device cannot be asked where its encoders are sitting -- there is no
-    Introduction message here, the way the APC has one -- so the controller
-    starts not knowing, and the first touch of a `scale` encoder slams the
-    group from full to wherever the knob happens to be.
-
-    If a ring write moves the device's own idea of the value, the fix is
-    trivial and exact: at startup, push the show's value out to each bound
-    encoder and the knob IS where the show is. If it only lights LEDs, the
-    software has to do soft takeover instead -- ignore the encoder until it
-    passes through the value already in force.
-
-    Needs the input port too, which is why this is the one mode here that
-    opens both.
-    """
-    from xtouch_constants import RING_CC
-    import xtouch_dump
-
-    control = RING_CC["A"][index - 1]
-    port_name = xtouch_dump.find_port()
-    print(f"Encoder {index}: ring on CC {control}, watching input on")
-    print(f"'{port_name}'.\n")
-
-    with _open("in", port_name) as inp:
-        for _ in inp.iter_pending():
-            pass                            # drop anything already queued
-
-        cc(out, control, 0)
-        print("  Ring set to 0. Turn the encoder ONE CLICK to the RIGHT.")
-        wait("turned -- Enter")
-        first = [m.value for m in inp.iter_pending()
-                 if m.type == "control_change" and m.control == control]
-        print(f"  device sent: {first or 'nothing'}")
-
-        cc(out, control, 100)
-        print("\n  Ring set to 100. Turn ONE CLICK to the RIGHT again.")
-        wait("turned -- Enter")
-        second = [m.value for m in inp.iter_pending()
-                  if m.type == "control_change" and m.control == control]
-        print(f"  device sent: {second or 'nothing'}")
-
-    print("\n  Around 101 the second time: the write MOVED the encoder, and")
-    print("  the controller can seed it at startup -- no jump, ever.")
-    print("  Around 2 both times: the write only lit LEDs, the position is")
-    print("  the device's alone, and soft takeover is the only fix.")
-
-
 #!/usr/bin/env python3
 """
 Behringer X-Touch Mini LED output test.
@@ -61,6 +11,7 @@ Behringer X-Touch Mini LED output test.
     python3 xtouch_leds.py seed 1      # can the host SET an encoder's value?
     python3 xtouch_leds.py states 8    # what velocities does an LED accept?
     python3 xtouch_leds.py layers      # does an LED reach the inactive layer?
+    python3 xtouch_leds.py scan-channels   # sweep the other MIDI channels
     python3 xtouch_leds.py off         # everything dark
 
 Options: --auto (run on timers), --port "NAME" (pick the MIDI output).
@@ -75,8 +26,8 @@ measured on both layers.
 It matters because Behringer's X-Touch Editor says something else entirely:
 notes 0-15 for the LEDs, program change for the layer, a behaviour CC and a
 value CC per ring. None of that is true of this unit in Standard mode; all
-three were tested and none worked. The numbers live in xtouch_dump.py and
-are imported, so this file cannot drift from them.
+three were tested and none worked. The numbers live in xtouch_constants.py
+and are imported, so this file cannot drift from them.
 
 EVERY MODE HERE HAS BEEN RUN AND ANSWERED; see xtouch_dump.py for the map
 they produced. They stay because the answers are the driver's foundation and
@@ -308,6 +259,94 @@ def test_press(out, number):
     print("  down, because xtouch.py works around it on every release.")
     wait("Enter")
     note(out, note_on, 0)
+
+
+def test_seed(out, index):
+    """Does writing a ring also set the encoder's POSITION, or only its lamps?
+
+    THE QUESTION THIS ANSWERS is what to do about the startup jump. This
+    device cannot be asked where its encoders are sitting -- there is no
+    Introduction message here, the way the APC has one -- so the controller
+    starts not knowing, and the first touch of a `scale` encoder slams the
+    group from full down to wherever the knob happens to be.
+
+    If a ring write moves the device's own idea of the value, the fix is
+    exact: at startup, push the show's value out to each bound encoder, and
+    the knob IS where the show is. If it only lights LEDs, the software has
+    to do soft takeover instead -- ignore the encoder until it passes
+    through the value already in force.
+
+    SELF-CALIBRATING, because the first version was not and told us nothing.
+    It wrote layer A's ring CC and listened for layer A's encoder CC, so on
+    layer B the ring did not move AND every message was filtered away: two
+    symptoms, one cause, and no data either way. It now works out the layer
+    from what the encoder sends, and reports every CC that arrives rather
+    than only the one it expected.
+
+    Needs the input port too, which is why this is the one mode here that
+    opens both.
+    """
+    import xtouch_dump
+
+    port_name = xtouch_dump.find_port()
+    print(f"Encoder {index}. Watching '{port_name}'.\n")
+    print("Either layer is fine -- which one you are on is worked out from")
+    print("what the encoder sends. Do not press LAYER while this runs.\n")
+
+    with _open("in", port_name) as inp:
+
+        def turned(prompt):
+            """Drain, prompt, then report every CC that arrived."""
+            for _ in inp.iter_pending():
+                pass
+            wait(prompt)
+            seen = [(m.control, m.value) for m in inp.iter_pending()
+                    if m.type == "control_change"]
+            for control, value in seen:
+                print(f"    CC {control} = {value}")
+            if not seen:
+                print("    nothing arrived")
+            return seen
+
+        seen = turned(f"turn encoder {index} a few clicks RIGHT -- Enter")
+        if not seen:
+            print("\n  No CC at all. That is the encoder not reaching this")
+            print("  script, which is not an answer to the question -- check")
+            print("  the port and that MC MODE is off, then run it again.")
+            return
+
+        control, before = seen[-1]
+        layer = "A" if control in RING_CC["A"] else "B"
+        print(f"\n  Encoder on layer {layer}, CC {control}, now at {before}.")
+
+        # Far from where it is sitting, so a move cannot be mistaken for the
+        # knob's own position, and away from the ends where a ring at 0 or
+        # 127 looks the same as one that ignored the write.
+        target = 10 if before > 64 else 110
+        cc(out, control, target)
+        print(f"\n  Ring set to {target}. Does the RING itself show that?")
+        print("  (a dot or a fill about that far round, depending on the")
+        print("  display style set for this encoder in X-Touch Editor)")
+        wait("Enter")
+
+        seen = turned("now turn ONE CLICK RIGHT -- Enter")
+        if not seen:
+            print("\n  Nothing arrived, so this run says nothing either way.")
+            return
+        after = seen[-1][1]
+        print(f"\n  Now at {after}.")
+        if abs(after - target) <= 3:
+            print(f"  It followed the write ({target}): the host CAN set an")
+            print("  encoder's position. The controller can seed every bound")
+            print("  encoder at startup and there is no jump, ever.")
+        elif abs(after - before) <= 3:
+            print(f"  It carried on from {before} and ignored the write: the")
+            print("  position is the device's alone. Soft takeover is then")
+            print("  the only fix -- ignore the encoder until it passes")
+            print("  through the value already in force.")
+        else:
+            print("  Neither. Write down what you saw rather than concluding")
+            print("  from it, and run it once more.")
 
 
 def test_layers(out):

@@ -390,6 +390,43 @@ class TestOutputMessages(unittest.TestCase):
             self.assertTrue(set(xtouch_dump.LED_NOTE[layer]) <= lit, layer)
 
 
+class TestProbeUsage(unittest.TestCase):
+    """--help has to print something, and has to list every mode.
+
+    It printed None. An edit inserted a function at position 0 of
+    xtouch_leds.py, ahead of the shebang and the module docstring, and every
+    mode still ran -- so nothing failed, and it shipped. The file was
+    structurally wrong in the one place nothing else looks.
+    """
+
+    def probes(self):
+        import xtouch_dump
+        import xtouch_leds
+        return (xtouch_dump, xtouch_leds)
+
+    def test_each_probe_has_its_usage_text_at_the_top(self):
+        for module in self.probes():
+            self.assertTrue(module.__doc__,
+                            f"{module.__name__} has no module docstring")
+            self.assertIn(f"{module.__name__}.py", module.__doc__)
+
+    def test_the_shebang_and_docstring_come_first(self):
+        for module in self.probes():
+            path = helper.os.path.join(helper.ROOT, f"{module.__name__}.py")
+            with open(path) as handle:
+                head = handle.read(40)
+            self.assertTrue(head.startswith("#!/usr/bin/env python3\n\"\"\""),
+                            f"{module.__name__}.py does not start with a "
+                            f"shebang and a docstring: {head!r}")
+
+    def test_every_mode_is_in_the_usage_text(self):
+        import xtouch_leds
+        modes = set(xtouch_leds.TESTS) | set(xtouch_leds.TAKES_NUMBER)
+        for mode in modes:
+            self.assertIn(f"xtouch_leds.py {mode}", xtouch_leds.__doc__,
+                          f"mode '{mode}' is not in --help")
+
+
 class TestProbeImports(unittest.TestCase):
     def test_importable_without_mido(self):
         # mido is imported inside the functions that need it, so the logic
