@@ -195,6 +195,7 @@ On the APC: `r0c0` grid (row 0 is the **bottom** row, note = row×8+col),
 | `scene` | activate a look | yes |
 | `chaser` | start/stop a chaser | yes |
 | `chaser_step` | advance a chaser one step. Blank target = every running chaser | no |
+| `chaser_hold` | freeze a chaser on its current step. Blank target = every running chaser | yes |
 | `tap` | tap tempo for the internal clock | no |
 | `clear` | drop everything (panic button) | no |
 | `reload` | re-read the CSVs live | no |
@@ -217,6 +218,20 @@ there warns.
 > anything else. Note that the release stops that target whoever started it,
 > so flashing a chaser that is already running from another pad will stop it
 > when you let go.
+
+**`chaser_hold` freezes, it does not stop.** The look stays live and the
+chaser stays running; only the automatic advance is silenced — beats and
+timers alike. `toggle` latches the hold, `flash` holds only while the pad is
+down. `solo` means nothing here and warns.
+
+A manual `chaser_step` still works while frozen: freezing silences the clock,
+and a press is not the clock.
+
+> **Releasing rejoins the music; it does not resume.** A beat-synced chaser
+> let go mid-phrase lands wherever the track's beat position says, not
+> however many steps it was held for. That falls out of position being
+> derived rather than counted, and it is what you want — a held look rejoins
+> the music instead of trailing it.
 
 **`colour`** — a name (`red`, `amber`, `yellow_warm`, `yellow`, `green`,
 `turquoise`, `cyan`, `blue`, `lavender`, `mauve`, `magenta`, `pink`,

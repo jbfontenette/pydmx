@@ -19,6 +19,7 @@ bb8,chaser,rock-red_room-anthem,solo,a
 p1,tap,,,a
 p2,chaser_step,,,a
 p3,clear,,,a
+p4,chaser_hold,,flash,a
 p8,reload,,,a
 
 e1,bpm,,,a
@@ -46,6 +47,7 @@ bb8,clear,,,b
 p1,tap,,,b
 p2,chaser_step,,,b
 p3,clear,,,b
+p4,chaser_hold,,flash,b
 p8,reload,,,b
 
 f1,master,,,b

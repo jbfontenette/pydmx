@@ -615,7 +615,8 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print,
         kind = (row.get("type") or "scene").lower()
         is_fader = isinstance(note, tuple)
         valid = (("master", "bpm", "level", "scale") if is_fader else
-                 ("scene", "chaser", "chaser_step", "tap", "clear", "reload"))
+                 ("scene", "chaser", "chaser_step", "chaser_hold", "tap",
+                  "clear", "reload"))
         if kind not in valid:
             what = "a fader" if is_fader else "a pad"
             raise ValueError(f"{path} line {line_no}: type for {what} must be "
@@ -686,12 +687,13 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print,
                          f"{', '.join(chasers) or 'none'}")
                 continue
 
-        if kind == "chaser_step":
-            # A blank target means "advance every running chaser", which is
-            # the useful default for a single tap-tempo pad.
+        if kind in ("chaser_step", "chaser_hold"):
+            # A blank target means "every running chaser", which is the
+            # useful default for a single tap-tempo or freeze pad.
             if target and target not in chasers:
                 if warn:
-                    warn(f"{path} line {line_no}: step pad targets unknown "
+                    what = "step" if kind == "chaser_step" else "freeze"
+                    warn(f"{path} line {line_no}: {what} pad targets unknown "
                          f"chaser '{target}' -- binding SKIPPED. Known: "
                          f"{', '.join(chasers) or 'none'}")
                 continue
@@ -704,6 +706,17 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print,
         if mode not in ("toggle", "flash", "solo"):
             raise ValueError(f"{path} line {line_no}: mode must be toggle, "
                              f"flash or solo, got '{mode}'")
+
+        # Freezing has nothing to be the only live source OF -- it does not
+        # start or stop anything, it holds what is already running. Warned
+        # rather than fatal: it is a mode on a type that ignores it, the
+        # same shape of mistake as writing one on a reload pad.
+        if kind == "chaser_hold" and mode == "solo":
+            if warn:
+                warn(f"{path} line {line_no}: mode 'solo' means nothing for "
+                     f"chaser_hold -- treated as toggle. Use flash to hold "
+                     f"only while the pad is down.")
+            mode = "toggle"
 
         # These fire once on press and never consult mode. Writing 'toggle'
         # there suggests a latching behaviour that does not exist, so say so

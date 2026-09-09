@@ -72,6 +72,12 @@ class ChaserState:
         self.index = 0
         self.beats_seen = 0
         self.entered_at = now
+        # Frozen holds THIS step: the clock and the timers are ignored, the
+        # look stays put. It is a snapshot, not a counter, so invariant 4
+        # survives -- nothing is being tallied while frozen, and the first
+        # beat after unfreezing derives the index from the track's position
+        # again and snaps straight back into phase with the music.
+        self.frozen = False
 
     @property
     def step(self):
@@ -177,11 +183,46 @@ class Engine:
         self.clear()
         self.start_chaser(name, now)
 
+    def freeze_chaser(self, name=None, frozen=True):
+        """Hold a chaser on its current step, or every running one.
+
+        Freezing stops the AUTOMATIC advance -- beats and timers alike --
+        and nothing else. The step keeps rendering, so the look holds. A
+        manual step still works while frozen, because that is an explicit
+        instruction rather than the clock running on.
+
+        Unfreezing a beat-synced chaser does not resume where it paused: the
+        next beat derives the index from the track's position, so it lands
+        wherever the music now is. That is invariant 4 doing its job, and it
+        is what you want -- a held look released mid-phrase rejoins the
+        music instead of trailing it by however long you held it.
+        """
+        targets = [name] if name else list(self.running)
+        for target in targets:
+            state = self.running.get(target)
+            if state is not None and state.frozen != frozen:
+                state.frozen = frozen
+                self.dirty = True
+
+    def is_frozen(self, name=None):
+        """True if that chaser is held -- or if any running one is.
+
+        The blank case answers for a pad bound with no target, which freezes
+        everything: its lamp should say "something is held".
+        """
+        if name:
+            state = self.running.get(name)
+            return bool(state and state.frozen)
+        return any(state.frozen for state in self.running.values())
+
     def step_chaser(self, name=None, now=None):
         """Advance one chaser, or every running one when name is None.
 
         The blank-target case is what makes a single pad useful as a manual
         tempo tap across whatever happens to be running.
+
+        Works on a frozen chaser too: freezing silences the clock, and a
+        press is not the clock.
         """
         now = time.monotonic() if now is None else now
         targets = [name] if name else list(self.running)
@@ -206,7 +247,7 @@ class Engine:
         now = time.monotonic() if now is None else now
         for state in self.running.values():
             chaser = state.chaser
-            if not chaser.beat_synced:
+            if not chaser.beat_synced or state.frozen:
                 continue
             index = chaser.step_at(beat.pos)
             if index != state.index:
@@ -221,7 +262,7 @@ class Engine:
             # A beat-synced chaser is driven only by the clock. If the music
             # stops it HOLDS rather than free-running on a timer, which is
             # what keeps it in phase when the music comes back.
-            if state.chaser.beat_synced:
+            if state.chaser.beat_synced or state.frozen:
                 continue
             due = state.due_at()
             if due is not None and now >= due:

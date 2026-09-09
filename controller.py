@@ -148,6 +148,10 @@ def build_leds(surface, show, eng, style="intensity", layer=0, now=None):
     def is_on(binding):
         # Chasers light exactly like scenes -- is_active() covers both, so
         # the LED layer never has to care which kind a pad points at.
+        if binding.kind == "chaser_hold":
+            # A held rig looks identical to a running one from the front, so
+            # the pad that holds it is the only thing that can say so.
+            return eng.is_frozen(binding.target)
         return (binding.kind in ("scene", "chaser")
                 and eng.is_active(binding.target))
 
@@ -311,11 +315,15 @@ def handle(event, show, eng, log, state, actions):
         # resolve to the other layer and leave the scene stranded on.
         binding = state["held"].pop(note, None)
         if binding and binding.mode == "flash":
-            if binding.kind == "chaser":
+            if binding.kind == "chaser_hold":
+                eng.freeze_chaser(binding.target or None, False)
+                log(f"released {binding.target or 'all chasers'}")
+            elif binding.kind == "chaser":
                 eng.stop_chaser(binding.target)
+                log(f"{binding.target} off  [{describe_active(eng)}]")
             else:
                 eng.deactivate(binding.target)
-            log(f"{binding.target} off  [{describe_active(eng)}]")
+                log(f"{binding.target} off  [{describe_active(eng)}]")
         return
 
     binding = show.binding_for(note, state["layer"])
@@ -369,6 +377,18 @@ def handle(event, show, eng, log, state, actions):
         # is the same entry point a future OS2L beat will call.
         eng.step_chaser(binding.target or None)
         log(f"step {binding.target or 'all'}  [{describe_active(eng)}]")
+        return
+
+    if binding.kind == "chaser_hold":
+        # toggle latches the hold; flash holds only while the pad is down,
+        # and the release above lets it go. A blank target freezes whatever
+        # is running, which is the version you want on one pad.
+        target = binding.target or None
+        frozen = (not eng.is_frozen(binding.target)
+                  if binding.mode == "toggle" else True)
+        eng.freeze_chaser(target, frozen)
+        log(f"{'holding' if frozen else 'released'} "
+            f"{binding.target or 'all chasers'}")
         return
 
     if binding.mode == "toggle":

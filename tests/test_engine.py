@@ -294,6 +294,114 @@ class TestChaserClocking(unittest.TestCase):
         self.assertEqual(self.eng.chaser_position("timed"), (1, 2))
 
 
+class TestChaserFreeze(unittest.TestCase):
+    """Holding a chaser on its current step.
+
+    Freeze silences the CLOCK -- beats and timers -- and nothing else. The
+    interesting case is what happens on release: a beat-synced chaser does
+    not resume where it paused, it re-derives from the track's position and
+    lands where the music now is. That is invariant 4 still holding, and it
+    is the behaviour you want: a look released mid-phrase rejoins the music
+    instead of trailing it by however long you held it.
+    """
+
+    def setUp(self):
+        self.show, self.eng = make_engine()
+
+    def test_a_frozen_timed_chaser_stops_advancing(self):
+        self.eng.start_chaser("timed", now=0.0)
+        self.eng.freeze_chaser("timed")
+        self.eng.tick(now=10_000.0)
+        self.assertEqual(self.eng.chaser_position("timed"), (1, 2))
+
+    def test_it_advances_again_once_released(self):
+        self.eng.start_chaser("timed", now=0.0)
+        self.eng.freeze_chaser("timed")
+        self.eng.tick(now=10_000.0)
+        self.eng.freeze_chaser("timed", False)
+        self.eng.tick(now=10_001.0)
+        self.assertEqual(self.eng.chaser_position("timed"), (2, 2))
+
+    def test_a_frozen_beat_synced_chaser_ignores_beats(self):
+        # beatsync is 1 + 1 + 2, a 4-beat cycle: pos 0 is step 1, pos 1 is
+        # step 2, pos 2 and 3 are step 3. The beats sent here ALL map to a
+        # different step from the frozen one -- an earlier version walked
+        # eight beats and landed back on the frozen step by coincidence, so
+        # it passed with the freeze check removed entirely.
+        self.eng.start_chaser("beatsync", now=0.0)
+        self.eng.on_beat(beat(0))
+        self.assertEqual(self.eng.chaser_position("beatsync")[0], 1)
+        self.eng.freeze_chaser("beatsync")
+        for pos in (1, 2, 3, 5, 6, 7):
+            self.eng.on_beat(beat(pos))
+            self.assertEqual(self.eng.chaser_position("beatsync")[0], 1,
+                             f"moved on pos {pos}")
+
+    def test_releasing_rejoins_the_music_rather_than_resuming(self):
+        # The whole reason freeze needs no counter. Held on step 1 through
+        # eight beats, then released: the next beat puts it where pos says,
+        # which is deliberately NOT the step it was held on.
+        self.eng.start_chaser("beatsync", now=0.0)
+        self.eng.on_beat(beat(0))
+        self.eng.freeze_chaser("beatsync")
+        for pos in range(1, 9):
+            self.eng.on_beat(beat(pos))
+        self.assertEqual(self.eng.chaser_position("beatsync")[0], 1)
+
+        self.eng.freeze_chaser("beatsync", False)
+        self.eng.on_beat(beat(10))          # 10 % 4 == 2 -> step 3
+        self.assertEqual(self.eng.chaser_position("beatsync")[0], 3)
+
+    def test_a_manual_step_still_works_while_frozen(self):
+        # Freezing silences the clock, and a press is not the clock.
+        self.eng.start_chaser("manual", now=0.0)
+        self.eng.freeze_chaser("manual")
+        self.eng.step_chaser("manual")
+        self.assertEqual(self.eng.chaser_position("manual"), (2, 2))
+
+    def test_a_blank_target_freezes_everything_running(self):
+        self.eng.start_chaser("manual", now=0.0)
+        self.eng.start_chaser("timed", now=0.0)
+        self.eng.freeze_chaser()
+        self.assertTrue(self.eng.is_frozen("manual"))
+        self.assertTrue(self.eng.is_frozen("timed"))
+        self.assertTrue(self.eng.is_frozen())
+
+    def test_is_frozen_answers_for_a_pad_with_no_target(self):
+        # Its lamp should say "something is held", so any is the question.
+        self.eng.start_chaser("manual", now=0.0)
+        self.eng.start_chaser("timed", now=0.0)
+        self.assertFalse(self.eng.is_frozen())
+        self.eng.freeze_chaser("timed")
+        self.assertTrue(self.eng.is_frozen())
+        self.assertFalse(self.eng.is_frozen("manual"))
+
+    def test_freezing_nothing_running_is_harmless(self):
+        self.eng.freeze_chaser()
+        self.eng.freeze_chaser("manual")
+        self.assertFalse(self.eng.is_frozen())
+
+    def test_a_restarted_chaser_is_not_still_frozen(self):
+        # The flag lives on the running state, so stopping drops it. A
+        # chaser that came back held would be a mystery mid-set.
+        self.eng.start_chaser("timed", now=0.0)
+        self.eng.freeze_chaser("timed")
+        self.eng.stop_chaser("timed")
+        self.eng.start_chaser("timed", now=0.0)
+        self.assertFalse(self.eng.is_frozen("timed"))
+
+    def test_freezing_marks_the_output_dirty_but_only_on_a_change(self):
+        # dirty drives both the DMX frame and the LED repaint, so setting it
+        # for a no-op freeze would repaint the surface for nothing.
+        self.eng.start_chaser("timed", now=0.0)
+        self.eng.output()
+        self.eng.freeze_chaser("timed")
+        self.assertTrue(self.eng.dirty)
+        self.eng.output()
+        self.eng.freeze_chaser("timed")
+        self.assertFalse(self.eng.dirty)
+
+
 class TestSourceOrdering(unittest.TestCase):
     """Scenes and chasers share one ordered list, so LTP between them works."""
 

@@ -382,6 +382,91 @@ class TestWatchDetector(unittest.TestCase):
         self.assertEqual(self.eng.active, [("scene", "warm")])
 
 
+class TestChaserFreezeRouting(unittest.TestCase):
+    """A freeze pad, through the same path a press takes on the night."""
+
+    MAPPING = ("pad,type,target,mode,colour\n"
+               "r0c0,chaser,timed,toggle,red\n"
+               "r0c1,chaser_hold,timed,toggle,blue\n"
+               "r0c2,chaser_hold,timed,flash,blue\n"
+               "r0c3,chaser_hold,,toggle,white\n")
+
+    def setUp(self):
+        import virtualapc
+        self.previous = controller._SURFACE_MODULE
+        controller._SURFACE_MODULE = virtualapc
+        self.addCleanup(setattr, controller, "_SURFACE_MODULE", self.previous)
+        self.dir = helper.temp_show(mapping=self.MAPPING)
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.show, self.eng = show_and_engine(self.dir)
+        self.state = {"layer": 0, "held": {}, "relayout": False,
+                      "master_pending": None, "bpm_pending": None,
+                      "flash_until": 0.0, "internal": None}
+        self.eng.start_chaser("timed", now=0.0)
+
+    def event(self, *parts):
+        controller.handle(parts, self.show, self.eng,
+                          lambda m: None, self.state, {})
+
+    def test_toggle_latches_and_unlatches(self):
+        self.event("press", 1)
+        self.event("release", 1)
+        self.assertTrue(self.eng.is_frozen("timed"))
+        self.event("press", 1)
+        self.event("release", 1)
+        self.assertFalse(self.eng.is_frozen("timed"))
+
+    def test_flash_holds_only_while_the_pad_is_down(self):
+        self.event("press", 2)
+        self.assertTrue(self.eng.is_frozen("timed"))
+        self.event("release", 2)
+        self.assertFalse(self.eng.is_frozen("timed"))
+
+    def test_a_blank_target_holds_whatever_is_running(self):
+        self.eng.start_chaser("manual", now=0.0)
+        self.event("press", 3)
+        self.assertTrue(self.eng.is_frozen("timed"))
+        self.assertTrue(self.eng.is_frozen("manual"))
+
+    def test_a_freeze_pad_does_not_stop_the_chaser(self):
+        # The distinction that makes it a freeze and not a stop: the look
+        # stays live, so releasing it puts the rig back in motion rather
+        # than needing the chaser started again.
+        self.event("press", 1)
+        self.assertTrue(self.eng.is_active("timed"))
+        self.assertEqual(self.eng.chaser_position("timed"), (1, 2))
+
+    def test_the_pad_lights_while_the_rig_is_held(self):
+        # A held rig looks identical to a running one from the front, so
+        # this pad is the only thing that can say so. Bound-but-idle already
+        # glows at IDLE on this surface, so the test is idle vs ACTIVE, not
+        # dark vs lit.
+        import surface_constants
+        surface = _Recorder()
+        controller.build_leds(surface, self.show, self.eng, "intensity", 0)
+        self.assertEqual(surface.pads[1][0], surface_constants.IDLE)
+        self.event("press", 1)
+        controller.build_leds(surface, self.show, self.eng, "intensity", 0)
+        self.assertEqual(surface.pads[1][0],
+                         surface_constants.FEEDBACK["intensity"])
+
+
+class _Recorder:
+    """Records the last (behaviour) each pad was painted with."""
+
+    def __init__(self):
+        self.pads = {}
+
+    def pad(self, note, colour, behaviour=0, force=False):
+        self.pads[note] = (behaviour, colour)
+
+    def button(self, note, state=1, force=False):
+        pass
+
+    def pads_rgb(self, entries):
+        pass
+
+
 class TestHeldBindingCapture(unittest.TestCase):
     """Release uses the binding captured at PRESS, not a fresh lookup.
 

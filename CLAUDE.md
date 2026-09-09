@@ -15,7 +15,7 @@ against the code that exists, and which invariants it puts at risk.
 ## Before you start
 
 ```bash
-python3 -m unittest discover -s tests -t tests      # 227 tests, ~0.7s
+python3 -m unittest discover -s tests -t tests      # 281 tests, ~0.7s
 python3 controller.py --check                        # validate CSVs
 ```
 
@@ -65,7 +65,10 @@ hand the finished objects to the main loop for the swap; do not lock.
 **4. Beat-synced chaser position is derived, never counted.**
 `chaser.step_at(pos)` maps the track's beat number to a step. A counter
 drifts out of phase at every pause, seek and deck change and you only notice
-mid-set. Deriving means those cases need no handling at all.
+mid-set. Deriving means those cases need no handling at all -- and freeze is
+the same trick again: `ChaserState.frozen` skips the update, so releasing a
+held chaser re-derives from `pos` and rejoins the music rather than resuming
+however many steps late. A snapshot is not a counter.
 
 **5. `pos` can be negative.**
 Virtual DJ sends negative beat positions before the beat-grid origin.
