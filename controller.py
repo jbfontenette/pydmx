@@ -96,7 +96,22 @@ def surface_module():
 TICK_S = 0.005          # 200Hz input poll -- well under human perception
 
 
-def build_leds(surface, show, eng, style="intensity", layer=0):
+def blink_phase(style, mod, now=None):
+    """Which half of a software blink we are in, or None if not blinking.
+
+    A surface whose lamps can only be on or off animates them from here
+    rather than in hardware. Derived from the clock, never counted -- the
+    same reason chaser position is (invariant 4): a counter would drift
+    against a repaint that only happens when something changes.
+    """
+    rate = getattr(mod, "SOFT_BLINK", {}).get(style)
+    if not rate:
+        return None
+    now = time.monotonic() if now is None else now
+    return int(now * rate * 2) % 2 == 0
+
+
+def build_leds(surface, show, eng, style="intensity", layer=0, now=None):
     """Paint the surface to match engine state.
 
     Same colour for idle and active; only the brightness changes. That keeps
@@ -124,6 +139,7 @@ def build_leds(surface, show, eng, style="intensity", layer=0):
         return
 
     visible = show.layer(layer)
+    phase = blink_phase(style, mod, now)
 
     def is_on(binding):
         # Chasers light exactly like scenes -- is_active() covers both, so
@@ -160,7 +176,13 @@ def build_leds(surface, show, eng, style="intensity", layer=0):
             # A binary lamp cannot show "bound" and "active" at once. Where
             # the buttons ARE the surface, active is the one worth having:
             # the layout you learn, but what is running you have to see.
-            surface.button(note, 1 if is_on(binding) else 0)
+            lit = is_on(binding)
+            if phase is not None:
+                # Only the active ones blink. An inactive lamp is dark
+                # either way, and blinking every bound button would turn the
+                # surface into a strobe that says nothing.
+                lit = lit and phase
+            surface.button(note, 1 if lit else 0)
         else:
             surface.button(note, 1)
 
@@ -710,6 +732,7 @@ def main():
 
         state = {"master_pending": None, "layer": vocab.LAYER_AT_START,
                  "held": {}, "relayout": False, "flash_until": 0.0,
+                 "blink_phase": None,
                  "publish_at": 0.0, "music": None,
                  "clock_source": None, "bpm_pending": None,
                  "internal": internal}
@@ -807,6 +830,17 @@ def main():
                 if state["relayout"] and surface:
                     state["relayout"] = False
                     build_leds(surface, show, eng, style, state["layer"])
+
+                # A software blink is the one thing that has to repaint
+                # without the engine changing. Only when the half-cycle
+                # flips, and the LED diff cache means that costs one message
+                # per blinking lamp -- nothing else on the surface moves.
+                phase = blink_phase(style, apc_mod, now)
+                if (phase is not None and surface
+                        and not state["flash_until"]
+                        and phase != state["blink_phase"]):
+                    state["blink_phase"] = phase
+                    build_leds(surface, show, eng, style, state["layer"], now)
 
                 # One clock at a time. VirtualDJ wins whenever it is
                 # actually delivering beats; the internal clock covers the

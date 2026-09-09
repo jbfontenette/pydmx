@@ -147,7 +147,11 @@ without re-testing on hardware will regress things that took a while to find.
 - The X-Touch's button LEDs are binary: velocity 0 off, every value 1-127
   plain on, measured from off each time. No brightness, no blink. Its
   encoders are absolute *because* it is in Standard mode; MC MODE makes them
-  relative and moves every number.
+  relative and moves every number. Blink is real but MC-only (velocity 1,
+  buttons at notes 40-45 and 84-95), which is why `--feedback blink` is done
+  in software here: `SOFT_BLINK` on a surface module says which styles the
+  main loop animates itself, and the phase is derived from the clock rather
+  than counted, for the same reason as invariant 4.
 - **The X-Touch changes its own lamps and rings.** A button lights while held
   and goes dark on release whatever the host set, and a ring follows its knob
   as you turn it. So a diff-based LED cache goes stale on every press and

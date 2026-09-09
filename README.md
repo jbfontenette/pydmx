@@ -271,6 +271,13 @@ before you lay a show out:
   whatever the controller set. That is the device's own doing, not a
   setting; the driver puts the lamp back on release, so an active binding
   ends up lit either way. You will see the lamp blink once as you let go.
+- **`--feedback blink` and `fast-blink` work here, in software.** These
+  lamps cannot blink themselves in Standard mode, and the mode that can
+  (MC MODE) would make the encoders relative and move every number on the
+  device. So the controller toggles the lamp instead, at 2 or 4 blinks a
+  second. Only *active* bindings blink. `pulse` is not offered — it is a
+  hardware rate the APC's pads animate on their own, and there is nothing
+  here to animate it with.
 - **Encoders are absolute**, so they behave exactly like faders and take the
   same types. Each layer keeps its own position, so `e1` on layer `a` and
   `e1` on layer `b` are two independent controls.

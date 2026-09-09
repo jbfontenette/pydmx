@@ -57,6 +57,11 @@ FEEDBACK = {
     "fast-blink": BLINK_2,
 }
 
+# Nothing: this device animates its own pads, and the rates above are the
+# hardware's. A surface whose lamps can only be on or off animates them from
+# the main loop instead -- see xtouch_constants.
+SOFT_BLINK = {}
+
 
 # --- the surface vocabulary -----------------------------------------------
 #

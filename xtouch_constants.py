@@ -333,10 +333,27 @@ ON = 127
 # the value collapse.
 IDLE = OFF
 
-# Only one entry, on purpose. No velocity blinks and none dims, so offering
-# --feedback pulse here would be a lie; with one key, an unsupported style
-# fails at startup naming what this surface can actually do.
-FEEDBACK = {"intensity": ON}
+# The device cannot blink. Velocity 0 is off and every value from 1 to 127 is
+# plain steady on, measured from off each time, on channel 10. Blink DOES
+# exist at velocity 1 -- but in MC MODE, where the buttons are notes 40-45
+# and 84-95 and the encoders send relative deltas, which would cost the
+# absolute encoders and this entire control map for a flashing lamp.
+#
+# So the blinking styles are done in SOFTWARE: the controller toggles the
+# lamp and the device just holds whatever it was last told. That is the same
+# place the rest of this surface's state already lives, and it means a style
+# behaves identically on every button without any per-button setting in
+# X-Touch Editor to keep in step with the show files.
+#
+# FEEDBACK still maps style -> what a lit lamp is sent, so that build_leds
+# reads the same on both surfaces. What differs is SOFT_BLINK.
+FEEDBACK = {"intensity": ON, "blink": ON, "fast-blink": ON}
+
+# style -> blinks per second, for styles this surface animates itself.
+# Empty on a device that blinks in hardware. Deliberately slow: the repaint
+# is diff-based, so a blinking lamp costs one MIDI message per half-cycle
+# and nothing else on the surface is re-sent.
+SOFT_BLINK = {"blink": 2.0, "fast-blink": 4.0}
 
 
 def layer_index(name):

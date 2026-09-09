@@ -154,11 +154,27 @@ class TestSurfaceContract(unittest.TestCase):
                              getattr(surface_constants, name), name)
 
     def test_feedback_lists_only_what_the_surface_can_do(self):
-        # The X-Touch's lamps are binary -- measured velocity by velocity.
-        # Offering 'pulse' would be a lie that showed up only as a pad that
-        # never animated, so --feedback rejects it at startup instead.
+        # 'pulse' is a hardware rate the APC's pads animate themselves. The
+        # X-Touch's lamps are binary -- measured velocity by velocity -- so
+        # offering pulse there would be a lie that showed up only as a lamp
+        # that never animated. --feedback rejects it at startup instead.
         self.assertIn("pulse", surface_constants.FEEDBACK)
-        self.assertEqual(list(xtouch_constants.FEEDBACK), ["intensity"])
+        self.assertNotIn("pulse", xtouch_constants.FEEDBACK)
+
+    def test_a_surface_that_cannot_blink_blinks_in_software(self):
+        # Blink DOES exist on this device, at velocity 1 -- but in MC MODE,
+        # where the buttons are notes 40-45 and 84-95 and the encoders send
+        # relative deltas. That would cost the absolute encoders and the
+        # whole control map for a flashing lamp. So the controller toggles
+        # it instead, which also keeps every button behaving the same
+        # without per-button configuration to keep in step with the show.
+        self.assertFalse(surface_constants.SOFT_BLINK)
+        self.assertEqual(set(xtouch_constants.SOFT_BLINK),
+                         {"blink", "fast-blink"})
+        for style in xtouch_constants.SOFT_BLINK:
+            self.assertIn(style, xtouch_constants.FEEDBACK)
+        self.assertGreater(xtouch_constants.SOFT_BLINK["fast-blink"],
+                           xtouch_constants.SOFT_BLINK["blink"])
 
     def test_only_a_surface_with_pads_has_an_idle_brightness(self):
         # IDLE collapses to OFF where a lamp cannot be dimmed, which is the
@@ -807,3 +823,92 @@ class TestArgumentChecking(unittest.TestCase):
         # in one and not the other is a lie in whichever they trust.
         for flag in controller.FLAGS:
             self.assertIn(flag, controller.__doc__, flag)
+
+
+class TestSoftwareBlink(unittest.TestCase):
+    """Blinking a lamp the device cannot blink.
+
+    The X-Touch's LEDs are binary in Standard mode, and the mode that can
+    blink them costs the absolute encoders. So --feedback blink toggles the
+    lamp from the main loop instead. The phase is DERIVED from the clock,
+    never counted, for the same reason chaser position is: a repaint only
+    happens when something changes, and a counter would drift against it.
+    """
+
+    def phase(self, style, now):
+        return controller.blink_phase(style, xtouch_constants, now)
+
+    def test_a_hardware_blink_is_left_to_the_hardware(self):
+        self.assertIsNone(controller.blink_phase("blink", surface_constants))
+        self.assertIsNone(controller.blink_phase("intensity",
+                                                 xtouch_constants))
+
+    def test_the_phase_alternates_at_the_declared_rate(self):
+        rate = xtouch_constants.SOFT_BLINK["blink"]
+        half = 1.0 / (rate * 2)
+        self.assertNotEqual(self.phase("blink", 0.0),
+                            self.phase("blink", half * 1.05))
+        self.assertEqual(self.phase("blink", 0.0),
+                         self.phase("blink", half * 2.05))
+
+    def test_fast_blink_is_faster(self):
+        # Two styles that ticked at the same rate would be two names for one
+        # thing, and the difference is unnoticeable across a dark room.
+        slow = [self.phase("blink", t / 100) for t in range(100)]
+        fast = [self.phase("fast-blink", t / 100) for t in range(100)]
+        flips = lambda seq: sum(a != b for a, b in zip(seq, seq[1:]))
+        self.assertGreater(flips(fast), flips(slow))
+
+    def test_the_phase_is_derived_from_the_clock_not_counted(self):
+        # Same instant, same answer, however many times it is asked -- so a
+        # repaint driven by an unrelated event cannot advance the blink.
+        for now in (0.0, 1.234, 99.5):
+            self.assertEqual(self.phase("blink", now), self.phase("blink", now))
+
+
+class TestBlinkingALayout(unittest.TestCase):
+    """What actually reaches the lamps when a blink style is running."""
+
+    MAPPING = ("pad,type,target,mode,layer\n"
+               "bt1,scene,warm,toggle,a\n"
+               "bt2,scene,half,toggle,a\n")
+
+    def setUp(self):
+        import os
+        import engine as engine_mod
+        self.path = helper.temp_show(mapping="")
+        self.addCleanup(shutil.rmtree, self.path)
+        with open(os.path.join(self.path, "mapping-xtouch.csv"), "w") as f:
+            f.write(self.MAPPING)
+        self.show = showfile.Show(self.path, surface=xtouch_constants)
+        self.show.load()
+        self.eng = engine_mod.Engine(self.show.patch, self.show.scenes,
+                                     self.show.chasers)
+        self.previous = controller._SURFACE_MODULE
+        controller._SURFACE_MODULE = xtouch_constants
+        self.addCleanup(setattr, controller, "_SURFACE_MODULE", self.previous)
+
+    def paint(self, style, now):
+        surface = TestPaintingAnXTouchLayout.Recorder()
+        controller.build_leds(surface, self.show, self.eng, style, 0, now)
+        return surface.buttons
+
+    def test_an_active_lamp_alternates(self):
+        self.eng.activate("warm")
+        half = 1.0 / (xtouch_constants.SOFT_BLINK["blink"] * 2)
+        first = self.paint("blink", 0.0)[8]
+        second = self.paint("blink", half * 1.05)[8]
+        self.assertNotEqual(first, second)
+
+    def test_an_inactive_lamp_stays_dark_through_both_halves(self):
+        # Blinking every BOUND button would turn the surface into a strobe
+        # that says nothing. Only what is running blinks.
+        half = 1.0 / (xtouch_constants.SOFT_BLINK["blink"] * 2)
+        for moment in (0.0, half * 1.05):
+            self.assertEqual(self.paint("blink", moment)[9], 0)
+
+    def test_intensity_never_blinks(self):
+        self.eng.activate("warm")
+        half = 1.0 / (xtouch_constants.SOFT_BLINK["blink"] * 2)
+        for moment in (0.0, half * 1.05, half * 2.05):
+            self.assertEqual(self.paint("intensity", moment)[8], 1)
