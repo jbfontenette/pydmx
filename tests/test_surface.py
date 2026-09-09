@@ -642,3 +642,51 @@ class TestPaintingAnXTouchLayout(unittest.TestCase):
         self.assertEqual(controller.fader_value(binding, 9, self.eng), 127)
         self.eng.set_master(0)
         self.assertEqual(controller.fader_value(binding, 9, self.eng), 0)
+
+
+class TestArgumentChecking(unittest.TestCase):
+    """An unknown flag stops the program instead of meaning nothing.
+
+    This is the failure it exists to stop: --surface was typed against a
+    build that did not have it yet, the flag was ignored in silence, and the
+    APC started and failed on a missing port. The error pointed at the
+    hardware. A typo does exactly the same thing.
+    """
+
+    def refuse(self, *args):
+        with self.assertRaises(SystemExit) as caught:
+            controller.check_args(list(args))
+        return str(caught.exception)
+
+    def test_an_unknown_flag_is_refused(self):
+        self.assertIn("--surfce", self.refuse("--surfce", "xtouch"))
+
+    def test_a_near_miss_is_named(self):
+        self.assertIn("Did you mean --surface?", self.refuse("--surfce"))
+
+    def test_nothing_close_offers_no_guess(self):
+        # Suggesting --no-dmx for --nonsense because they share "--no" is
+        # noise dressed as help.
+        self.assertNotIn("Did you mean", self.refuse("--nonsense"))
+
+    def test_every_documented_flag_is_accepted(self):
+        controller.check_args(["--check", "--sim", "--no-dmx", "--no-midi",
+                               "--beats", "--watch"])
+
+    def test_a_flag_s_value_is_not_mistaken_for_a_flag(self):
+        controller.check_args(["--surface", "xtouch"])
+        controller.check_args(["--feedback", "pulse", "--check"])
+
+    def test_an_optional_value_may_be_left_out(self):
+        # --os2l and --monitor both have useful defaults, so the next
+        # argument is only swallowed when it is not itself a flag.
+        controller.check_args(["--os2l", "--no-dmx"])
+        controller.check_args(["--os2l", "9000", "--no-dmx"])
+        controller.check_args(["--monitor", "--watch"])
+        controller.check_args(["--monitor", "host:9002"])
+
+    def test_the_flag_list_matches_what_the_help_promises(self):
+        # The usage text at the top of the file is what people read; a flag
+        # in one and not the other is a lie in whichever they trust.
+        for flag in controller.FLAGS:
+            self.assertIn(flag, controller.__doc__, flag)

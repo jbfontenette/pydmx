@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""DMX controller: APC mini mk2 pads launch scenes.
+"""DMX controller: surface pads and buttons launch scenes.
 
     pip install pyserial mido python-rtmidi
     python3 controller.py
+    python3 controller.py --surface xtouch    # Behringer X-Touch Mini
+    python3 controller.py --surface apc       # Akai APC mini mk2 (default)
     python3 controller.py --no-midi     # keyboard only, for testing
     python3 controller.py --no-dmx      # no adapter needed, dry run
     python3 controller.py --monitor     # publish frames for dmxmon.py
@@ -461,8 +463,50 @@ def apply_reload(show, eng):
     return True, message
 
 
+# Every flag main() understands, and whether it takes a value. "maybe" means
+# the value is optional and is only taken when the next argument is not
+# itself a flag -- --os2l and --monitor both have useful defaults.
+FLAGS = {
+    "--check": None, "--no-midi": None, "--no-dmx": None, "--sim": None,
+    "--beats": None, "--watch": None,
+    "--surface": "value", "--feedback": "value",
+    "--os2l": "maybe", "--monitor": "maybe",
+}
+
+
+def check_args(args):
+    """Refuse anything main() does not understand, before it does anything.
+
+    Unknown flags used to be ignored in silence, which is how an evening got
+    spent wondering why --surface xtouch started the APC and failed on a
+    missing port: the flag was not there yet, so it meant nothing, and
+    nothing said so. A typo does exactly the same thing, and the failure it
+    produces points at the hardware rather than at the command line.
+    """
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument not in FLAGS:
+            # difflib rather than a prefix match: --nonsense shares "--no"
+            # with --no-dmx and --no-midi, and offering both as suggestions
+            # is noise. Edit distance says nothing is close, which is true.
+            import difflib
+            near = difflib.get_close_matches(argument, FLAGS, n=2, cutoff=0.7)
+            hint = (f"\n  Did you mean {' or '.join(near)}?" if near else "")
+            sys.exit(f"unknown argument '{argument}'.{hint}\n  Flags: "
+                     + " ".join(sorted(FLAGS)))
+        takes = FLAGS[argument]
+        index += 1
+        if takes == "value":
+            index += 1                  # the flag's own parser reports a
+        elif takes == "maybe":          # missing or malformed value
+            if index < len(args) and not args[index].startswith("-"):
+                index += 1
+
+
 def main():
     args = sys.argv[1:]
+    check_args(args)
     check_only = "--check" in args
     no_midi = "--no-midi" in args
     no_dmx = "--no-dmx" in args
