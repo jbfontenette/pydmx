@@ -1,19 +1,32 @@
-"""Wire protocol between controller.py (--sim) and apcsim.py.
+"""Wire protocol between controller.py and an on-screen surface.
 
 Two UDP sockets, mirroring the monitor design and for the same reason: the
 controller must never stall because a UI process is slow, absent or dead.
 
     controller --LED updates--> port 9100 (apcsim listens)
     apcsim     --key events---> port 9101 (controller listens)
+    controller --LED updates--> port 9102 (xtouchsim listens)
+    xtouchsim  --key events---> port 9103 (controller listens)
 
-Messages, all prefixed with b"APC1":
+A separate pair per simulator, so leaving one running cannot confuse the
+other. Only one surface is ever driven at a time, but "the other one is
+still open in a tab" is a normal way to spend an evening.
+
+Messages, all prefixed with b"APC1" -- kept as-is now that a second device
+uses this. The bytes are arbitrary and only have to match on both ends, and
+the two simulators cannot reach each other anyway, being on different ports.
 
   from controller           from simulator
     L <note><vel><chan>...    P <note>          press
-    C                         R <note>          release
-    ?  (fader enquiry)        F <n><value>      fader n (1-9) moved
+    K <control><value>        R <note>          release
+    C                         F <n><value>      fader n (1-9) moved
+    ?  (fader enquiry)        K <control><val>  a CC moved
                               I <f1..f9>        reply to fader enquiry
                               H                 hello / resync request
+
+K carries a RAW control-change number in both directions, for a device whose
+continuous controls and LED rings are CCs rather than notes. F stays for the
+APC, whose faders are numbered 1-9 by the surface rather than by MIDI.
 
 LED updates are batched: one datagram can carry many triples, because a full
 repaint is 80 of them.
@@ -32,6 +45,8 @@ import socket
 MAGIC = b"APC1"
 LED_ADDR = ("127.0.0.1", 9100)
 EVENT_ADDR = ("127.0.0.1", 9101)
+XTOUCH_LED_ADDR = ("127.0.0.1", 9102)
+XTOUCH_EVENT_ADDR = ("127.0.0.1", 9103)
 
 LED = ord("L")
 CLEAR = ord("C")
@@ -41,6 +56,7 @@ PRESS = ord("P")
 RELEASE = ord("R")
 FADER = ord("F")
 INTRO = ord("I")
+CC = ord("K")
 
 MAX_PACKET = 2048
 
@@ -104,6 +120,15 @@ class Endpoint:
             self.sock.close()
         except OSError:
             pass
+
+
+def encode_cc(control, value):
+    """A raw control change, either direction."""
+    return bytes((CC, control & 0x7F, value & 0x7F))
+
+
+def decode_cc(payload):
+    return payload[1], payload[2]
 
 
 def encode_leds(updates):

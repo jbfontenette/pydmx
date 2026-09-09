@@ -9,6 +9,7 @@
     python3 controller.py --no-dmx      # no adapter needed, dry run
     python3 controller.py --monitor     # publish frames for dmxmon.py
     python3 controller.py --sim         # on-screen APC (run apcsim.py too)
+    python3 controller.py --surface xtouchsim   # ...on-screen X-Touch
     python3 controller.py --os2l        # beat sync from Virtual DJ
     python3 controller.py --os2l 9997   # ...on a non-default port
     python3 controller.py --os2l --beats  # log every beat (noisy, debugging)
@@ -71,6 +72,7 @@ SURFACES = {
     "apc": ("surface_constants", "apc"),        # Akai APC mini mk2
     "apcsim": ("surface_constants", "virtualapc"),   # ...drawn by apcsim.py
     "xtouch": ("xtouch_constants", "xtouch"),   # Behringer X-Touch Mini
+    "xtouchsim": ("xtouch_constants", "virtualxtouch"),  # ...via xtouchsim.py
 }
 
 _SURFACE = "apc"
@@ -888,7 +890,10 @@ def main():
                 # without the engine changing. Only when the half-cycle
                 # flips, and the LED diff cache means that costs one message
                 # per blinking lamp -- nothing else on the surface moves.
-                phase = blink_phase(style, apc_mod, now)
+                # vocab, not the driver: apc_mod only exists when a surface
+                # was opened, and this runs on every tick. Reading it here
+                # crashed --no-midi on its first pass.
+                phase = blink_phase(style, vocab, now)
                 if (phase is not None and surface
                         and not state["flash_until"]
                         and phase != state["blink_phase"]):

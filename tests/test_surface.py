@@ -82,11 +82,25 @@ def _driver(name):
     The suite has to run with no third-party packages -- CLAUDE.md says so,
     and it is what keeps the invariants checkable on a machine that has never
     seen a MIDI backend. Both drivers do `import mido` at module scope, so
-    the stand-in has to be in sys.modules at their FIRST import.
+    the stand-in has to be in sys.modules before their FIRST import.
+
+    Registered permanently rather than under mock.patch.dict, which was the
+    first attempt and was subtly wrong: patch.dict restores the WHOLE
+    dictionary on exit, so every module imported inside the block -- xtouch,
+    and xtouch_surface with it -- was dropped from sys.modules afterwards.
+    A later `import xtouch_surface` then built a SECOND module object with a
+    second XTouchBase, and `issubclass(XTouch, XTouchBase)` was False for
+    two classes of the same name from the same file.
     """
-    with mock.patch.dict("sys.modules", {"mido": STUB_MIDO}):
-        import importlib
-        return importlib.import_module(name)
+    import importlib
+    return importlib.import_module(name)
+
+
+try:                                    # real backend, if there is one
+    import mido                         # noqa: F401
+except ImportError:
+    import sys
+    sys.modules["mido"] = STUB_MIDO
 
 
 APC_MODULE = _driver("apc")
@@ -1137,3 +1151,184 @@ class TestBlinkingALayout(unittest.TestCase):
         half = 1.0 / (xtouch_constants.SOFT_BLINK["blink"] * 2)
         for moment in (0.0, half * 1.05, half * 2.05):
             self.assertEqual(self.paint("intensity", moment)[8], 1)
+
+
+class TestVirtualXTouch(unittest.TestCase):
+    """The simulator driver, over the real sockets.
+
+    Not a stub: two Endpoints on loopback ports, so the wire format is
+    exercised rather than assumed. What is NOT retested here is the device's
+    behaviour -- the layer inference, the translation, the caches -- because
+    virtualxtouch does not implement any of it. It shares xtouch_surface
+    with the real driver, which is the whole reason the simulator behaves
+    like the device instead of merely resembling it.
+    """
+
+    LED = ("127.0.0.1", 19102)
+    EVENT = ("127.0.0.1", 19103)
+
+    def setUp(self):
+        import simlink
+        import virtualxtouch
+        self.sim = simlink.Endpoint(self.LED, self.EVENT)   # stands in for
+        self.addCleanup(self.sim.close)                     # xtouchsim
+        self.device = virtualxtouch.VirtualXTouch(led_addr=self.LED,
+                                                  event_addr=self.EVENT)
+        self.addCleanup(self.device.link.close)
+
+    def settle(self):
+        import time
+        time.sleep(0.05)
+
+    def lamps(self):
+        import simlink
+        out = []
+        for payload in self.sim.drain():
+            if payload[0] == simlink.LED:
+                out += simlink.decode_leds(payload)
+        return out
+
+    def ccs(self):
+        import simlink
+        return [simlink.decode_cc(p) for p in self.sim.drain()
+                if p[0] == simlink.CC]
+
+    def test_it_is_the_same_class_of_surface_as_the_hardware(self):
+        # If these ever diverge, the simulator has stopped being a stand-in.
+        import virtualxtouch
+        import xtouch_surface
+        self.assertTrue(issubclass(virtualxtouch.VirtualXTouch,
+                                   xtouch_surface.XTouchBase))
+        self.assertTrue(issubclass(XTOUCH_MODULE.XTouch,
+                                   xtouch_surface.XTouchBase))
+
+    def test_a_press_carries_the_raw_note_and_is_translated_here(self):
+        # The wire carries what the device would send -- note 32, layer B --
+        # so the translation everything depends on is exercised, not skipped.
+        import simlink
+        self.sim.send(bytes([simlink.PRESS, 32]))
+        self.settle()
+        self.assertEqual(self.device.poll(), [("layer", 1), ("press", 8)])
+
+    def test_a_release_arrives_as_a_release(self):
+        import simlink
+        self.sim.send(bytes([simlink.PRESS, 8]))
+        self.settle()
+        self.device.poll()
+        self.sim.send(bytes([simlink.RELEASE, 8]))
+        self.settle()
+        self.assertEqual(self.device.poll()[0], ("release", 8))
+
+    def test_an_encoder_arrives_as_a_fader_on_its_layer(self):
+        import simlink
+        self.sim.send(simlink.encode_cc(13, 100))       # layer B, encoder 3
+        self.settle()
+        self.assertEqual(self.device.poll(), [("layer", 1), ("fader", 3, 100)])
+
+    def test_painting_both_layers_puts_both_notes_on_the_wire(self):
+        self.device.button(8, 1, layer=0)
+        self.device.button(8, 1, layer=1)
+        self.settle()
+        self.assertEqual([(note, velocity) for note, velocity, _
+                          in self.lamps()], [(8, 127), (32, 127)])
+
+    def test_a_lamp_update_is_not_a_press(self):
+        # PRESS and RELEASE travel the other way. Sending a lamp as one
+        # would have the simulator report a phantom keypress to itself.
+        import simlink
+        self.device.button(8, 1, layer=0)
+        self.settle()
+        kinds = {payload[0] for payload in self.sim.drain()}
+        self.assertEqual(kinds, {simlink.LED})
+
+    def test_a_ring_goes_out_on_the_showing_layer(self):
+        import simlink
+        self.sim.send(bytes([simlink.PRESS, 32]))       # now on layer B
+        self.settle()
+        self.device.poll()
+        self.sim.drain()
+        self.device.ring(3, 64)
+        self.settle()
+        self.assertEqual(self.ccs(), [(13, 64)])
+
+    def test_hello_replays_every_layer(self):
+        # The controller only repaints when something changes, so a
+        # simulator started against a static show would stay blank without
+        # this. Both layers, because only one of the two writes lands.
+        import simlink
+        self.device.button(8, 1, layer=0)
+        self.device.button(8, 1, layer=1)
+        self.settle()
+        self.sim.drain()
+        self.sim.send(bytes([simlink.HELLO]))
+        self.settle()
+        self.device.poll()
+        self.settle()
+        self.assertEqual(sorted(note for note, _, _ in self.lamps()), [8, 32])
+
+
+class TestXTouchSimulatorDevice(unittest.TestCase):
+    """The on-screen device's own awkwardness, which is the point of it.
+
+    A simulator that was merely convenient would let a show be built that
+    behaves differently on the night. These three are exactly what the
+    driver exists to handle, so the simulator has to do them too.
+    """
+
+    def surface(self):
+        import xtouchsim
+        return xtouchsim.Surface()
+
+    def test_a_lamp_for_the_hidden_layer_is_discarded_not_stored(self):
+        # What makes painting both layers safe -- and what would make the
+        # simulator lie if it accepted everything.
+        surface = self.surface()
+        surface.apply_note(32, 127)             # layer B, while showing A
+        self.assertFalse(surface.lamp(8))
+        surface.layer = 1
+        self.assertFalse(surface.lamp(8), "a dropped write was stored")
+
+    def test_a_lamp_for_the_showing_layer_lands(self):
+        surface = self.surface()
+        surface.apply_note(8, 127)
+        self.assertTrue(surface.lamp(8))
+
+    def test_each_layer_keeps_its_own_lamps(self):
+        surface = self.surface()
+        surface.apply_note(8, 127)
+        surface.layer = 1
+        self.assertFalse(surface.lamp(8))
+        surface.apply_note(32, 127)
+        self.assertTrue(surface.lamp(8))
+        surface.layer = 0
+        self.assertTrue(surface.lamp(8), "the other layer was forgotten")
+
+    def test_a_held_button_lights_itself(self):
+        # Whatever the host asked for. This is why the driver re-asserts the
+        # value on release, and without it here you would never see that.
+        surface = self.surface()
+        self.assertFalse(surface.lamp(8))
+        surface.held.add(8)
+        self.assertTrue(surface.lamp(8))
+
+    def test_a_ring_write_moves_the_encoder(self):
+        # Measured on the device, and the cure for the startup jump: the
+        # simulator has to move too, or a seeded show would look wrong here
+        # and right on the night.
+        surface = self.surface()
+        surface.apply_cc(1, 100)                # layer A, encoder 1
+        self.assertEqual(surface.rings[0][1], 100)
+        surface.apply_cc(11, 64)                # layer B, while showing A
+        self.assertEqual(surface.rings[1][1], 0, "a hidden write landed")
+
+    def test_the_layer_key_tells_the_controller_nothing(self):
+        # There is no message for it. The simulator is faithful by having
+        # nothing to send, which is why xtouchsim's own layer key only
+        # mutates local state -- see main().
+        import xtouchsim
+        with open(helper.os.path.join(helper.ROOT, "xtouchsim.py")) as handle:
+            source = handle.read()
+        layer_key = source[source.index('elif key == "l":'):]
+        layer_key = layer_key[:layer_key.index("elif key")]
+        self.assertNotIn("link.send", layer_key)
+        self.assertNotIn("send_note", layer_key)

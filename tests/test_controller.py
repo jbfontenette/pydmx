@@ -637,6 +637,50 @@ class TestReloadHasOneCallSite(unittest.TestCase):
         self.assertEqual(calls, 2, "expected one definition and one call site")
 
 
+class TestTheMainLoopActuallyRuns(unittest.TestCase):
+    """Start the controller for real, briefly, and see that it survives.
+
+    Nothing else in the suite runs main(). That is how `--no-midi` came to
+    crash on its first pass through the loop: the blink repaint read
+    apc_mod, which is only assigned when a surface was opened, and no unit
+    test can see an unbound name in a while-loop it never enters.
+
+    Two runs, because the loop takes different paths with and without a
+    surface, and both are supported ways to start.
+    """
+
+    def run_briefly(self, *flags, seconds=0.6):
+        import subprocess
+        proc = subprocess.Popen(
+            ["python3", "controller.py", "--no-dmx", *flags],
+            cwd=helper.ROOT, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True)
+        self.addCleanup(proc.kill)
+        try:
+            output, _ = proc.communicate(timeout=seconds)
+            alive = False
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            output, _ = proc.communicate(timeout=5)
+            alive = True
+        return output, alive
+
+    def test_it_survives_with_no_surface_at_all(self):
+        # --feedback blink on purpose: the crash was in the blink repaint,
+        # which only runs once the loop is turning.
+        output, alive = self.run_briefly("--no-midi", "--feedback", "blink")
+        self.assertNotIn("Traceback", output, output[-800:])
+        self.assertTrue(alive, f"exited on its own:\n{output[-800:]}")
+
+    def test_it_survives_driving_the_x_touch_simulator(self):
+        # A real driver, real sockets, and build_leds painting both layers
+        # of a surface whose layer is unknown -- the startup state.
+        output, alive = self.run_briefly("--surface", "xtouchsim",
+                                         "--feedback", "blink")
+        self.assertNotIn("Traceback", output, output[-800:])
+        self.assertTrue(alive, f"exited on its own:\n{output[-800:]}")
+
+
 class TestShowFlagIsWiredUp(unittest.TestCase):
     """Every tool takes --show, and each one is a separate wiring job.
 

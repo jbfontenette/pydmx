@@ -52,6 +52,14 @@ python3 apcsim.py                                # on-screen APC
 python3 dmxmon.py                                # live DMX channel view
 ```
 
+Or the X-Touch, the same way:
+
+```bash
+python3 controller.py --surface xtouchsim --no-dmx --monitor
+python3 xtouchsim.py
+python3 dmxmon.py
+```
+
 **With hardware:**
 
 ```bash
@@ -326,6 +334,14 @@ before any press has revealed which layer is showing; one press fixes it.
 > The device must be in **Standard mode**, not MC MODE. MC MODE changes every
 > number on the device and makes the encoders send relative deltas instead of
 > positions.
+
+`xtouchsim.py` is the on-screen version, selected with `--surface xtouchsim`.
+It reproduces the device's awkward parts deliberately — the LAYER key tells
+the controller nothing, a lamp written to the hidden layer is discarded, and
+a button lights itself while held — because those are what the driver exists
+to handle, and a simulator that skipped them would let you build a show that
+behaves differently on the night. It shares the driver's own behaviour
+(`xtouch_surface.py`) rather than imitating it, so the two cannot drift.
 
 ---
 

@@ -15,7 +15,7 @@ against the code that exists, and which invariants it puts at risk.
 ## Before you start
 
 ```bash
-python3 -m unittest discover -s tests -t tests      # 298 tests, ~0.7s
+python3 -m unittest discover -s tests -t tests      # 314 tests, ~2.4s
 python3 controller.py --check                        # validate CSVs
 python3 controller.py --show PATH                    # a different show folder
 ```
@@ -27,8 +27,9 @@ invisible in the code and easy to "simplify" away.
 To exercise the full system with no hardware, three terminals:
 
 ```bash
-python3 controller.py --sim --no-dmx --monitor
-python3 apcsim.py
+python3 controller.py --sim --no-dmx --monitor          # ...or:
+python3 controller.py --surface xtouchsim --no-dmx      # on-screen X-Touch
+python3 apcsim.py                                       # xtouchsim.py
 python3 dmxmon.py
 ```
 
@@ -209,6 +210,12 @@ without re-testing on hardware will regress things that took a while to find.
   whole hardware session testing an LED protocol that was working fine.
 - Keep hardware modules free of "pretend" branches. `NullSender` and
   `VirtualAPC` are separate classes precisely so the real ones stay simple.
+  Where the shared part is subtle rather than trivial, put it in a base both
+  inherit -- `xtouch_surface.XTouchBase` holds the layer inference, the
+  translation and the caches, and `xtouch.py` and `virtualxtouch.py` add
+  three I/O methods each. That is still two classes and no flag; what it
+  avoids is a simulator that RESEMBLES the device instead of behaving like
+  it. The device's own quirks belong in the simulator, not the driver.
 
 ## When adding a feature
 
