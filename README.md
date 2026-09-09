@@ -58,6 +58,7 @@ python3 dmxmon.py                                # live DMX channel view
 python3 controller.py --check              # validate the CSVs, touch nothing
 python3 controller.py                      # go, on the APC
 python3 controller.py --surface xtouch     # go, on the X-Touch Mini
+python3 controller.py --show gig2          # a different folder of show CSVs
 ```
 
 ---
@@ -366,9 +367,21 @@ else. They are the right first thing to run on a new adapter or a new cable:
 if a fixture responds to them, the hardware is good and any later problem is
 in the show files.
 
-Controller flags: `--check`, `--surface <name>`, `--sim`, `--no-dmx`,
-`--no-midi`, `--monitor`, `--os2l [port]`, `--watch`, `--beats`,
+Controller flags: `--check`, `--show <path>`, `--surface <name>`, `--sim`,
+`--no-dmx`, `--no-midi`, `--monitor`, `--os2l [port]`, `--watch`, `--beats`,
 `--feedback <style>`.
+
+`--show` points at a different folder of show CSVs, and every tool takes it —
+`controller.py`, `play_scene.py`, `dmxmon.py` and `os2l_drive.py`. The default
+is `show/` beside the script, so nothing changes if you never pass it. A path
+that is not a directory is refused by name at startup rather than surfacing
+later as a missing `profiles.csv`.
+
+One difference worth knowing: with the default folder, a mapping file is
+looked for in `show/` **and then beside the script** — a fallback that exists
+because a mapping in the wrong place once loaded zero bindings in silence.
+Name a folder explicitly and only that folder is searched, since quietly
+loading another show's `mapping.csv` would give you half of the wrong rig.
 
 `--surface` picks the control surface: `apc` (default), `apcsim` (what
 `--sim` selects) or `xtouch`. It is never guessed from what happens to be

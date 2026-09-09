@@ -10,8 +10,10 @@
     python3 dmxmon.py --all          # include unpatched non-zero channels
     python3 dmxmon.py --swatches     # check your terminal renders colours
     python3 dmxmon.py --plain        # no colour, if your terminal mangles it
+    python3 dmxmon.py --show gig2    # take the channel labels from elsewhere
 
-Reads the patch from show/ purely for labels, and the values from the UDP
+Reads the patch from the show folder purely for labels (--show PATH picks a
+different one), and the values from the UDP
 tap. It never opens the serial port, so it cannot conflict with the
 controller -- you can start and stop it freely mid-show.
 
@@ -27,7 +29,6 @@ import colours
 import monitor
 import showfile
 
-SHOW_DIR = "show"
 BAR_WIDTH = 24
 
 # Truecolor gives exact RGB; xterm-256 is the fallback for terminals without
@@ -175,6 +176,7 @@ def render(rows, frame, stats, changed, show_all):
 def main():
     global PLAIN
     args = sys.argv[1:]
+    show_dir = showfile.show_option(args)
     show_all = "--all" in args
     PLAIN = "--plain" in args
 
@@ -190,14 +192,14 @@ def main():
         spec = args[index + 1]
 
     try:
-        show = showfile.Show(SHOW_DIR)
+        show = showfile.Show(show_dir)
         show.load()
     except (OSError, ValueError, KeyError) as exc:
         sys.exit(f"Show file error: {exc}")
 
     rows = build_rows(show.patch)
     if not rows:
-        sys.exit("No patched channels. Check show/fixtures.csv.")
+        sys.exit(f"No patched channels. Check {show.directory}/fixtures.csv.")
 
     try:
         addr = monitor.parse_addr(spec)

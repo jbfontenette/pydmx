@@ -303,5 +303,53 @@ class TestReload(unittest.TestCase):
             shutil.rmtree(path)
 
 
+class TestShowDirectoryOption(unittest.TestCase):
+    """--show PATH, and the two ways it can go quietly wrong."""
+
+    def test_the_flag_and_its_value_are_both_removed(self):
+        # The reason this is a helper rather than four copies of an
+        # `if "--show" in args`. play_scene.py takes a scene name
+        # positionally, so a value left in the list would be read as one:
+        # `play_scene.py --show gig2 warm` would look for a scene called
+        # 'gig2' and fail for a reason nothing on screen explains.
+        args = ["--show", helper.TEST_SHOW, "warm", "--check"]
+        self.assertEqual(showfile.show_option(args), helper.TEST_SHOW)
+        self.assertEqual(args, ["warm", "--check"])
+
+    def test_the_default_is_untouched_when_the_flag_is_absent(self):
+        args = ["warm"]
+        self.assertEqual(showfile.show_option(args),
+                         showfile.DEFAULT_SHOW_DIR)
+        self.assertEqual(args, ["warm"])
+
+    def test_a_missing_directory_is_refused_by_name(self):
+        with self.assertRaises(SystemExit) as caught:
+            showfile.show_option(["--show", "/no/such/show"])
+        self.assertIn("/no/such/show", str(caught.exception))
+
+    def test_a_file_is_not_a_show(self):
+        with self.assertRaises(SystemExit):
+            showfile.show_option(["--show", __file__])
+
+    def test_a_missing_value_is_refused(self):
+        for args in (["--show"], ["--show", "--check"]):
+            with self.assertRaises(SystemExit):
+                showfile.show_option(list(args))
+
+    def test_a_named_show_does_not_borrow_a_mapping_from_the_cwd(self):
+        # You asked for that show; getting half of another one is worse than
+        # getting none, and the warning names every path that was tried.
+        show = showfile.Show("elsewhere/gig2")
+        self.assertTrue(all(path.startswith("elsewhere/gig2")
+                            for path in show._mapping_candidates),
+                        show._mapping_candidates)
+
+    def test_the_default_show_still_looks_beside_the_script(self):
+        # Unchanged for every existing rig: the fallback exists because a
+        # mapping in the wrong place once loaded ZERO bindings in silence.
+        show = showfile.Show()
+        self.assertIn("mapping.csv", show._mapping_candidates)
+
+
 if __name__ == "__main__":
     unittest.main()

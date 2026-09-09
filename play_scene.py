@@ -8,6 +8,7 @@
     python3 play_scene.py -i                 # interactive: switch and reload
     python3 play_scene.py -i --watch         # auto-reload on file change
     python3 play_scene.py --check            # validate CSVs, no hardware
+    python3 play_scene.py --show gig2        # a different folder of CSVs
 
 Bypassing the show files entirely -- use these when output stops and you need
 to know whether the problem is the hardware or the CSVs:
@@ -31,7 +32,6 @@ import time
 import dmx
 import showfile
 
-SHOW_DIR = "show"
 
 
 def show_rig(show):
@@ -121,7 +121,7 @@ def sweep(sender, start, end, base):
             time.sleep(1.0)
             print()
     sender.apply(base)
-    print("\nSweep done. Write what you saw into show/profiles.csv as "
+    print("\nSweep done. Write what you saw into profiles.csv as "
           "offsets from the fixture address.")
 
 
@@ -179,7 +179,7 @@ def interactive(show, sender, watching):
     watch_stop = threading.Event()
     if watching:
         threading.Thread(target=watcher, args=(watch_stop,), daemon=True).start()
-        print("Watching show/ for changes.")
+        print(f"Watching {show.directory}/ for changes.")
 
     print("\nCommands: <scene name> | list | reload | watch | off | quit")
     print("          raw 65=50,67=11   (bypass the show files)\n")
@@ -200,7 +200,7 @@ def interactive(show, sender, watching):
                     threading.Thread(target=watcher, args=(watch_stop,),
                                      daemon=True).start()
                     watching = True
-                    print("  watching show/ for changes")
+                    print(f"  watching {show.directory}/ for changes")
                 else:
                     watch_stop.set()
                     watching = False
@@ -278,6 +278,7 @@ def diagnostics(raw_spec, sweep_spec):
 
 def main():
     args = sys.argv[1:]
+    show_dir = showfile.show_option(args)
     raw_spec = _option(args, "--raw")
     sweep_spec = _option(args, "--sweep")
     check_only = "--check" in args
@@ -291,7 +292,7 @@ def main():
         diagnostics(raw_spec, sweep_spec)
         return
 
-    show = showfile.Show(SHOW_DIR)
+    show = showfile.Show(show_dir)
     try:
         warnings = show.load()
     except (OSError, ValueError, KeyError) as exc:

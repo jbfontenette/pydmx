@@ -637,5 +637,38 @@ class TestReloadHasOneCallSite(unittest.TestCase):
         self.assertEqual(calls, 2, "expected one definition and one call site")
 
 
+class TestShowFlagIsWiredUp(unittest.TestCase):
+    """Every tool takes --show, and each one is a separate wiring job.
+
+    Four tools, three argument-parsing styles between them: the flag is easy
+    to add to one and forget in another, and forgetting is silent -- the
+    tool just reads the default show and looks like it worked.
+    """
+
+    TOOLS = ("controller.py", "play_scene.py", "dmxmon.py", "os2l_drive.py")
+
+    def source(self, name):
+        with open(helper.os.path.join(helper.ROOT, name)) as handle:
+            return handle.read()
+
+    def test_every_tool_reads_the_flag(self):
+        for name in self.TOOLS:
+            source = self.source(name)
+            self.assertIn("--show", source, f"{name} does not take --show")
+            self.assertTrue("show_option" in source or "args.show" in source,
+                            f"{name} mentions --show but never reads it")
+
+    def test_no_tool_hard_codes_the_default_show_directory(self):
+        # The default lives in showfile, once, so it cannot come to mean two
+        # different things in two tools.
+        for name in self.TOOLS:
+            body = self.source(name).split('"""', 2)[-1]
+            self.assertNotIn('= "show"', body, name)
+
+    def test_controller_lists_it_with_the_other_flags(self):
+        self.assertIn("--show", controller.FLAGS)
+        self.assertEqual(controller.FLAGS["--show"], "value")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -27,6 +27,45 @@ from fnmatch import fnmatch
 # hardware -- so --check works on a machine with no MIDI backend installed.
 import surface_constants
 
+# Where a show lives when nobody says otherwise. One name, imported by every
+# tool, so "the default" cannot drift between them.
+DEFAULT_SHOW_DIR = "show"
+
+
+def check_show_dir(path):
+    """Fail loudly on a show directory that is not there.
+
+    Without this a mistyped --show surfaces several layers down as a missing
+    profiles.csv, naming a file the user never typed and a directory they
+    have to work backwards to recognise.
+    """
+    import os
+    if not os.path.isdir(path):
+        raise SystemExit(
+            f"no show directory at '{path}'"
+            + ("" if os.path.exists(path) else " -- it does not exist")
+            + f"\n  A show is a folder of CSVs. The default is "
+              f"'{DEFAULT_SHOW_DIR}/' beside the script.")
+    return path
+
+
+def show_option(args, default=DEFAULT_SHOW_DIR):
+    """Pull '--show PATH' out of an argument list, checking it exists.
+
+    Removes the flag AND its value, which matters for the tools that take
+    positional arguments: without it, `play_scene.py --show gig2 warm` would
+    read 'gig2' as the scene name and fail on a scene that does not exist,
+    for a reason nothing on screen would explain.
+    """
+    if "--show" not in args:
+        return default
+    index = args.index("--show")
+    if index + 1 >= len(args) or args[index + 1].startswith("-"):
+        raise SystemExit("--show needs a directory: --show path/to/show")
+    path = args[index + 1]
+    del args[index:index + 2]
+    return check_show_dir(path)
+
 FADE = "fade"
 SNAP = "snap"
 
@@ -798,31 +837,46 @@ class Show:
     the behaviour you want when you are editing during a gig.
     """
 
-    def __init__(self, directory="show", surface=None):
+    def __init__(self, directory=DEFAULT_SHOW_DIR, surface=None):
         import os
         # The surface decides the control vocabulary and which mapping file
         # is read. Held rather than passed around because reload() has to
         # parse against the same one, and a show that reloaded into a
         # different device's dialect would be a spectacular way to fail.
         self.surface = surface or surface_constants
+        # Kept so messages can name the folder actually in use. Several said
+        # "show/" literally, which stopped being true the moment --show
+        # existed -- and a message that names the wrong file is worse than
+        # one that names none.
+        self.directory = directory
         self.paths = {
             "profiles": os.path.join(directory, "profiles.csv"),
             "fixtures": os.path.join(directory, "fixtures.csv"),
             "scenes": os.path.join(directory, "scenes.csv"),
             "chasers": os.path.join(directory, "chasers.csv"),
         }
-        # mapping.csv is looked for in show/ first, then next to the script.
-        # An earlier version checked only show/ and silently loaded ZERO
-        # bindings if it was elsewhere -- pads then did nothing, with no
-        # message explaining why. Never fail silently on a missing binding
-        # file again: mapping_path records what was actually used.
+        # mapping.csv is looked for in the show directory first, then next
+        # to the script. An earlier version checked only show/ and silently
+        # loaded ZERO bindings if it was elsewhere -- pads then did nothing,
+        # with no message explaining why. Never fail silently on a missing
+        # binding file again: mapping_path records what was actually used.
         # Per surface, because an APC layout and an X-Touch layout cannot
         # be the same file: 64 pads do not fit on 16 buttons, and the
         # vocabularies do not overlap. The APC keeps the bare name second so
         # every existing show still loads untouched.
+        #
+        # The beside-the-script fallback applies to the DEFAULT layout only.
+        # Once a show directory has been named explicitly, quietly loading
+        # somebody else's mapping.csv from the working directory would be a
+        # surprise: you asked for that show and got half of another one. The
+        # silent-failure this fallback guarded against is covered better now
+        # by the warning and the NO BINDINGS banner, which name every path
+        # that was tried.
+        named = directory != DEFAULT_SHOW_DIR
         self._mapping_candidates = [
             path for name in self.surface.MAPPING_NAMES
-            for path in (os.path.join(directory, name), name)
+            for path in ((os.path.join(directory, name),) if named
+                         else (os.path.join(directory, name), name))
         ]
         self.mapping_path = None
         self.profiles = {}

@@ -24,7 +24,7 @@ import engine as engine_mod
 import os2l
 import showfile
 
-SHOW_DIR = "show"
+SHOW_DIR = showfile.DEFAULT_SHOW_DIR
 
 BOLD = "\x1b[1m"
 DIM = "\x1b[2m"
@@ -45,7 +45,7 @@ def list_chasers(show):
                             else "hold"))
             print(f"      {i + 1}. {step.scene:<16} {timing}")
     print(f"\n{DIM}Only fully beat-synced chasers follow the music. See "
-          f"show/chasers.csv.{RESET}\n")
+          f"{show.directory}/chasers.csv.{RESET}\n")
 
 
 def main():
@@ -55,9 +55,11 @@ def main():
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--monitor", action="store_true",
                         help="publish frames so dmxmon.py can show them")
+    parser.add_argument("--show", default=SHOW_DIR, metavar="PATH",
+                        help="folder of show CSVs (default: %(default)s)")
     args = parser.parse_args()
 
-    show = showfile.Show(SHOW_DIR)
+    show = showfile.Show(showfile.check_show_dir(args.show))
     try:
         for warning in show.load():
             if "no pad" not in warning:

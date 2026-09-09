@@ -15,8 +15,9 @@ against the code that exists, and which invariants it puts at risk.
 ## Before you start
 
 ```bash
-python3 -m unittest discover -s tests -t tests      # 288 tests, ~0.7s
+python3 -m unittest discover -s tests -t tests      # 298 tests, ~0.7s
 python3 controller.py --check                        # validate CSVs
+python3 controller.py --show PATH                    # a different show folder
 ```
 
 Both run with no hardware and no third-party packages. **Run the tests before

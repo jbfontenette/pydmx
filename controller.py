@@ -14,6 +14,7 @@
     python3 controller.py --os2l --beats  # log every beat (noisy, debugging)
     python3 controller.py --watch       # reload the CSVs when they change
     python3 controller.py --check       # validate CSVs, touch no hardware
+    python3 controller.py --show gig2   # a different folder of show CSVs
     python3 controller.py --feedback pulse   # active pads pulse instead
     python3 controller.py --feedback blink   # active pads blink instead
     python3 controller.py --feedback rgb     # EXPERIMENTAL, SysEx 24-bit
@@ -56,7 +57,7 @@ import showfile
 # main() -- input routing, reload reconciliation -- is stdlib-only logic the
 # tests exercise without any hardware packages installed.
 
-SHOW_DIR = "show"
+
 
 # Which module provides the control surface. Resolved once in main() from
 # --surface; every other call site goes through surface_module() and never
@@ -543,7 +544,7 @@ def apply_reload(show, eng):
 FLAGS = {
     "--check": None, "--no-midi": None, "--no-dmx": None, "--sim": None,
     "--beats": None, "--watch": None,
-    "--surface": "value", "--feedback": "value",
+    "--surface": "value", "--feedback": "value", "--show": "value",
     "--os2l": "maybe", "--monitor": "maybe",
 }
 
@@ -581,6 +582,7 @@ def check_args(args):
 def main():
     args = sys.argv[1:]
     check_args(args)
+    show_dir = showfile.show_option(args)
     check_only = "--check" in args
     no_midi = "--no-midi" in args
     no_dmx = "--no-dmx" in args
@@ -635,7 +637,7 @@ def main():
             sys.exit(f"unknown feedback style '{style}'. Options: "
                      + ", ".join(vocab.FEEDBACK))
 
-    show = showfile.Show(SHOW_DIR, surface=vocab)
+    show = showfile.Show(show_dir, surface=vocab)
     try:
         warnings = show.load()
     except (OSError, ValueError, KeyError) as exc:
@@ -666,8 +668,7 @@ def main():
     if not show.bindings:
         wanted = " or ".join(vocab.MAPPING_NAMES)
         print("\n  *** NO BINDINGS LOADED -- every press will do nothing.")
-        print(f"  *** {wanted} must be in {SHOW_DIR}/ or beside "
-              f"controller.py.\n")
+        print(f"  *** {wanted} must be in {show_dir}/.\n")
     for problem in show.patch.conflicts():
         print(f"PATCH PROBLEM: {problem}")
 
@@ -855,7 +856,7 @@ def main():
         if watching:
             threading.Thread(target=watch_files, daemon=True,
                              args=(show, stop, reload_requested)).start()
-            print("Watching show/ for changes.")
+            print(f"Watching {show.directory}/ for changes.")
 
         try:
             while True:
