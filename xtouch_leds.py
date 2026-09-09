@@ -5,6 +5,7 @@ Behringer X-Touch Mini LED output test.
     pip install mido python-rtmidi
 
     python3 xtouch_leds.py scan        # walk the button LEDs, both layers
+    python3 xtouch_leds.py press 8     # does pressing a lit button darken it?
     python3 xtouch_leds.py rings       # which CC drives which encoder ring
     python3 xtouch_leds.py ring 11     # sweep the values of one ring CC
     python3 xtouch_leds.py states 8    # what velocities does an LED accept?
@@ -220,6 +221,44 @@ def test_states(out, number):
     note(out, number, 0)
 
 
+def test_press(out, number):
+    """Does the device change a lamp by itself when the button is pressed?
+
+    ANSWERED on the first run of the driver: yes. A button lights while held
+    and goes dark on release, of the device's own accord -- the controller
+    sends one Note On and never turns it off, and the lamp goes out anyway.
+
+    Which matters more than it looks, because of the diff cache every
+    surface here keeps: the controller would still believe the lamp is lit,
+    so it would never re-send, and a scene could run all night behind a dark
+    button. xtouch.py re-asserts the value on release for exactly this.
+
+    Kept to re-check after any X-Touch Editor change. The editor can
+    reportedly set a button's behaviour to Toggle, which may hand the lamp
+    to the host outright and make the re-assert unnecessary -- it would
+    still be harmless, and the driver does not depend on it either way.
+    """
+    print(f"Note {number}. Run 'scan' first if you do not know which one.\n")
+    note_on = number
+    note(out, note_on, 127)
+    print("  Lit. It should be ON now, with nothing touching it.")
+    wait("is it lit? -- Enter")
+
+    print("\n  Now PRESS AND HOLD that button.")
+    wait("holding -- Enter")
+    print("  Lit while held? That is the device lighting itself.")
+    wait("Enter")
+
+    print("\n  Now RELEASE it.")
+    wait("released -- Enter")
+    print("  If it is now DARK, the device turned off a lamp the host set,")
+    print("  and any diff-based LED cache is stale from this moment on.")
+    print("  If it is still lit, this device does not do that -- write that")
+    print("  down, because xtouch.py works around it on every release.")
+    wait("Enter")
+    note(out, note_on, 0)
+
+
 def test_layers(out):
     """Does the device remember LED state across a layer switch?
 
@@ -344,6 +383,8 @@ def _numbers(*ranges):
 TAKES_NUMBER = {
     "states": (test_states, _numbers(LED_NOTE["A"], LED_NOTE["B"]),
                "a button LED note"),
+    "press": (test_press, _numbers(LED_NOTE["A"], LED_NOTE["B"]),
+              "a button LED note"),
     "ring": (test_ring, _numbers(RING_CC["A"], RING_CC["B"]), "a ring CC"),
 }
 

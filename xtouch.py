@@ -83,6 +83,11 @@ class XTouch:
         # the hidden layer's entry true.
         self._delivered = [{} for _ in range(LAYERS)]
 
+        # What the SHOW wants, per layer. A second dict because this device
+        # changes its own lamps and rings behind our back -- see _restore --
+        # and re-asserting a value needs to know what the value was.
+        self._desired = [{} for _ in range(LAYERS)]
+
     # --- input ------------------------------------------------------------
     def poll(self):
         """Non-blocking. ('press'|'release', control), ('fader', n, v) and
@@ -118,6 +123,10 @@ class XTouch:
             if kind == "cc":
                 fader = to_fader(number, layer)
                 if fader is not None:
+                    if fader in RINGS:
+                        # The device drove this ring itself as the knob
+                        # turned, so what we believe it holds is now wrong.
+                        self._delivered[layer].pop(("ring", fader), None)
                     events.append(("fader", fader, msg.value))
                 continue
 
@@ -126,7 +135,34 @@ class XTouch:
                 events.append(("press", control))
             else:
                 events.append(("release", control))
+                self._restore(control)
         return events
+
+    def _restore(self, control):
+        """Put back a lamp the device changed by itself.
+
+        THE BUTTONS LIGHT THEMSELVES WHILE HELD AND GO DARK ON RELEASE. That
+        is the device's own doing, not ours -- the controller sends one Note
+        On and never turns it off, and the lamp goes out anyway.
+
+        Left alone it is worse than cosmetic, because of the diff cache: we
+        still believe the lamp is lit, so nothing is re-sent and a scene can
+        run all night behind a dark button. Every press would quietly
+        de-sync one more control.
+
+        So on release, forget what we thought and send the show's value
+        again. Only on release: doing it on press would fight the device for
+        the lamp while your finger is on it, and that local flash is decent
+        press feedback in its own right.
+
+        X-Touch Editor can reportedly set a button's behaviour to Toggle,
+        which may hand the lamp to the host outright. This does not depend
+        on that being true, or on the device being configured at all.
+        """
+        if self.layer is None or control not in BUTTONS:
+            return
+        self._delivered[self.layer].pop(control, None)
+        self.button(control, self._desired[self.layer].get(control, 0))
 
     # --- output -----------------------------------------------------------
     def button(self, control, state=1, force=False):
@@ -139,6 +175,7 @@ class XTouch:
         if self.layer is None:
             return
         state = 1 if state else 0
+        self._desired[self.layer][control] = state
         cache = self._delivered[self.layer]
         if not force and cache.get(control) == state:
             return
@@ -212,6 +249,10 @@ class XTouch:
         Both layers, not just the one showing: after a reload the bindings
         behind the hidden layer's lamps may have changed too, and its cache
         would otherwise keep a paint from being made when it does appear.
+
+        What the show WANTS is deliberately kept. It is about to be
+        recomputed by the next paint anyway, and dropping it would leave
+        _restore with nothing to put back if a release landed in between.
         """
         self._delivered = [{} for _ in range(LAYERS)]
 

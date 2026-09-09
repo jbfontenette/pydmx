@@ -59,21 +59,63 @@ def control_change(number, value):
     return message("control_change", control=number, value=value, channel=10)
 
 
+class Message(types.SimpleNamespace):
+    """Stands in for mido.Message: keeps whatever fields it is given."""
+
+    def __init__(self, type, **fields):
+        super().__init__(type=type, **fields)
+
+
+# Enough of a mido to build a driver and let it send.
+STUB_MIDO = types.SimpleNamespace(
+    Message=Message,
+    get_input_names=lambda: ["X-TOUCH MINI"],
+    get_output_names=lambda: ["X-TOUCH MINI"],
+    open_input=lambda name: StubPort(),
+    open_output=lambda name: StubPort(),
+)
+
+
+def _driver(name):
+    """Import a driver module, standing in for mido if it is not installed.
+
+    The suite has to run with no third-party packages -- CLAUDE.md says so,
+    and it is what keeps the invariants checkable on a machine that has never
+    seen a MIDI backend. Both drivers do `import mido` at module scope, so
+    the stand-in has to be in sys.modules at their FIRST import.
+    """
+    with mock.patch.dict("sys.modules", {"mido": STUB_MIDO}):
+        import importlib
+        return importlib.import_module(name)
+
+
+APC_MODULE = _driver("apc")
+XTOUCH_MODULE = _driver("xtouch")
+
+
+def stub_sends(module):
+    """Point a driver's mido at the stub, whichever one it imported.
+
+    By attribute, not by sys.modules: if another test imported the module
+    first with the real mido, it kept that reference and patching
+    sys.modules afterwards would do nothing at all -- silently, with the
+    driver then trying to open a real port.
+    """
+    return mock.patch.object(module, "mido", STUB_MIDO)
+
+
 def make_xtouch(incoming=()):
-    """An XTouch wired to stub ports, with mido stubbed out for its sends."""
-    import xtouch
+    """An XTouch built by its own constructor, on stub ports.
 
-    class Message(types.SimpleNamespace):
-        def __init__(self, type, **fields):
-            super().__init__(type=type, **fields)
-
-    device = xtouch.XTouch.__new__(xtouch.XTouch)
-    device.inp = StubPort(incoming)
-    device.out = StubPort()
-    device.layer = xtouch_constants.LAYER_AT_START
-    device._delivered = [{} for _ in range(xtouch_constants.LAYERS)]
-    patch = mock.patch.dict("sys.modules",
-                            {"mido": types.SimpleNamespace(Message=Message)})
+    By its own constructor on purpose. An earlier version built the object
+    with __new__ and set the fields by hand, which drifted the first time the
+    driver grew a second cache: every painting test errored on a field the
+    real device had had all along.
+    """
+    patch = stub_sends(XTOUCH_MODULE)
+    with patch:
+        device = XTOUCH_MODULE.XTouch()
+    device.inp.incoming = list(incoming)
     return device, patch
 
 
@@ -366,13 +408,89 @@ class TestXTouchPainting(unittest.TestCase):
         for sent in device.out.sent:
             self.assertEqual(sent.channel, xtouch_constants.CHANNEL)
 
+    def test_a_lamp_is_put_back_after_the_device_darkens_it(self):
+        # THE BUG THIS EXISTS FOR: the buttons light themselves while held
+        # and go dark on release, of their own accord -- the controller
+        # sends one Note On and never turns it off. Left alone the diff
+        # cache then believes the lamp is lit, nothing is re-sent, and a
+        # scene runs all night behind a dark button.
+        device, patch = make_xtouch([note_on(8)])
+        with patch:
+            device.poll()
+            device.button(8, 1)
+            before = len(self.lit(device))
+            device.inp.incoming = [note_off(8)]
+            device.poll()
+        self.assertEqual(self.lit(device)[before:],
+                         [(8, xtouch_constants.ON)])
+
+    def test_a_dark_lamp_is_not_lit_by_being_pressed(self):
+        # The re-assert sends what the SHOW wants, not what the device did.
+        device, patch = make_xtouch([note_on(8)])
+        with patch:
+            device.poll()
+            device.button(8, 0)
+            before = len(device.out.sent)
+            device.inp.incoming = [note_off(8)]
+            device.poll()
+        self.assertEqual([(m.note, m.velocity)
+                          for m in device.out.sent[before:]],
+                         [(8, xtouch_constants.OFF)])
+
+    def test_nothing_is_sent_while_the_button_is_held(self):
+        # Only on release. Fighting the device for the lamp under your
+        # finger would make the press feel dead, and that local flash is
+        # decent press feedback in its own right.
+        device, patch = make_xtouch()
+        with patch:
+            device.inp.incoming = [note_on(8)]
+            device.poll()
+            device.button(8, 1)
+            before = len(device.out.sent)
+            device.inp.incoming = [note_on(8)]
+            device.poll()
+        self.assertEqual(device.out.sent[before:], [])
+
+    def test_an_encoder_push_has_no_lamp_to_put_back(self):
+        device, patch = make_xtouch([note_on(0)])
+        with patch:
+            device.poll()
+            before = len(device.out.sent)
+            device.inp.incoming = [note_off(0)]
+            device.poll()
+        self.assertEqual(device.out.sent[before:], [])
+
+    def test_turning_a_knob_invalidates_what_we_believe_its_ring_holds(self):
+        # The device drives the ring itself as the knob turns, so the cache
+        # goes stale exactly as it does for a pressed button -- and would
+        # then suppress the repaint that should correct it.
+        device, patch = make_xtouch([note_on(8)])
+        with patch:
+            device.poll()
+            device.ring(3, 64)
+            before = len(device.out.sent)
+            device.ring(3, 64)                  # cached, sends nothing
+            self.assertEqual(device.out.sent[before:], [])
+            device.inp.incoming = [control_change(3, 100)]
+            device.poll()
+            device.ring(3, 64)                  # cache dropped, re-sent
+        self.assertEqual([(m.control, m.value)
+                          for m in device.out.sent[before:]], [(3, 64)])
+
+    def test_the_fader_has_no_ring_to_invalidate(self):
+        device, patch = make_xtouch([note_on(8)])
+        with patch:
+            device.poll()
+            device.inp.incoming = [control_change(9, 100)]
+            events = device.poll()
+        self.assertEqual(events, [("fader", 9, 100)])
+
     def test_asking_for_a_colour_pad_is_an_error_not_a_no_op(self):
         # build_leds only calls pad() when PADS is non-empty, so reaching
         # here means a caller assumed a grid. Silence would hide that until
         # someone wondered why their pads were dark.
-        import xtouch
         device, patch = make_xtouch()
-        with patch, self.assertRaises(xtouch.XTouchError):
+        with patch, self.assertRaises(XTOUCH_MODULE.XTouchError):
             device.pad(8, 5)
 
     def test_there_is_nothing_to_ask_about_fader_positions(self):
@@ -392,8 +510,7 @@ class TestAPCPolling(unittest.TestCase):
     """
 
     def poll_real(self, *incoming):
-        import apc
-        device = apc.APC.__new__(apc.APC)
+        device = APC_MODULE.APC.__new__(APC_MODULE.APC)
         device.inp = StubPort(incoming)
         return device.poll()
 

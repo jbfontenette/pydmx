@@ -148,6 +148,13 @@ without re-testing on hardware will regress things that took a while to find.
   plain on, measured from off each time. No brightness, no blink. Its
   encoders are absolute *because* it is in Standard mode; MC MODE makes them
   relative and moves every number.
+- **The X-Touch changes its own lamps and rings.** A button lights while held
+  and goes dark on release whatever the host set, and a ring follows its knob
+  as you turn it. So a diff-based LED cache goes stale on every press and
+  every turn, and would then suppress the very repaint that would fix it --
+  a scene running all night behind a dark button. `xtouch._restore` re-sends
+  the show's value on release, and turning a knob drops that ring's cache
+  entry. Not needed on the APC, which never touches its own LEDs.
 - The OS2L spec defines its messages but **not how they are delimited** on
   the stream. `os2l._Stream` decodes by object boundary. Do not switch to
   splitting on newlines.

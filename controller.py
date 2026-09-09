@@ -455,7 +455,7 @@ def apply_reload(show, eng):
     if dropped:
         message += f" (dropped active: {', '.join(dropped)})"
     if unbound:
-        mod = surface_module()
+        mod = surface_vocab()
         message += (" (faders dropped: " + ", ".join(
             mod.describe_control(("fader", number)) +
             (f"+{mod.LAYER_NAMES[lay]}" if lay else "")

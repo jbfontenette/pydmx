@@ -267,6 +267,10 @@ before you lay a show out:
   bright-when-active scheme has no equivalent. The buttons show what is
   **active** instead, which is the half worth having mid-set. `colour` means
   nothing here and warns if set.
+- **The device lights a button while you hold it, then darkens it**,
+  whatever the controller set. That is the device's own doing, not a
+  setting; the driver puts the lamp back on release, so an active binding
+  ends up lit either way. You will see the lamp blink once as you let go.
 - **Encoders are absolute**, so they behave exactly like faders and take the
   same types. Each layer keeps its own position, so `e1` on layer `a` and
   `e1` on layer `b` are two independent controls.
