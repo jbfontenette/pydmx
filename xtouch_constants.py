@@ -303,6 +303,14 @@ LAYER_NAMES = ("a", "b")
 # may not be the one in front of you.
 LAYER_AT_START = None
 
+# No fall-through. This layer button LATCHES: layer B is a second page you
+# stay on, not a modifier you hold, and a page that silently inherits the
+# other page's bindings wherever it is blank is a trap. Pressing an unbound
+# button on B fired A's reload, which is exactly the kind of surprise a page
+# should not have. If a control should work on both layers, bind it on both
+# -- one extra row, and the file then says what the surface does.
+LAYER_FALLS_THROUGH = False
+
 # These sixteen lamps ARE the surface: there is no grid behind them. So they
 # show what is ACTIVE rather than what is bound. A binary lamp cannot do
 # both, and mid-set you need to see what is running -- the layout you learn.

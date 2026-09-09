@@ -43,6 +43,13 @@ bb6,scene,par_strobe,flash,b
 bb7,scene,italia_par,toggle,b
 bb8,clear,,,b
 
+p1,tap,,,b
+p2,chaser_step,,,b
+p3,clear,,,b
+p8,reload,,,b
+
+f1,master,,,b
+
 e1,level,par1.dimmer,,b
 e2,level,par2.dimmer,,b
 e3,level,par3.dimmer,,b

@@ -256,8 +256,15 @@ unparseable tokens. See `show/mapping-xtouch.csv` for a worked example.
 
 The `layer` column takes `a` or `b`. **The device switches layers itself** —
 the LAYER button sends no MIDI at all — so the controller works out which
-layer is showing from the numbers arriving. Three consequences worth knowing
+layer is showing from the numbers arriving. Four consequences worth knowing
 before you lay a show out:
+
+- **Layer B does not inherit layer A.** The APC's SHIFT is a modifier you
+  hold, so an unbound shifted pad falls through to its unshifted binding.
+  This layer button *latches*: page B is a page you stay on, and a page that
+  silently inherited the other one wherever it was blank would fire the
+  wrong thing. Bind a control on both layers if you want it on both — the
+  loader warns if `master` is missing from a page.
 
 - **The surface stays dark until you press something.** The device never says
   which layer it is showing and cannot be asked, so at startup the controller

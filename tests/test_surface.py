@@ -131,18 +131,61 @@ class TestSurfaceContract(unittest.TestCase):
     NAMES = ("NAME", "MAPPING_NAMES", "LAYERS", "LAYER_NAMES",
              "LAYER_AT_START", "LAYER_HINT", "BUTTON_SHOWS",
              "PADS", "BUTTONS", "RINGS", "FADERS", "FADER_LAYERS",
-             "OFF", "IDLE", "FEEDBACK",
+             "OFF", "IDLE", "FEEDBACK", "SOFT_BLINK",
              "layer_index", "parse_control", "describe_control")
 
     def modules(self):
+        """Every module a call site might be holding: both vocabularies and
+        every driver. The drivers matter most -- that is where SOFT_BLINK
+        was missing while both vocabularies had it."""
         import virtualapc
-        return (surface_constants, xtouch_constants, virtualapc)
+        return (surface_constants, xtouch_constants, virtualapc,
+                APC_MODULE, XTOUCH_MODULE)
 
     def test_every_surface_carries_the_whole_vocabulary(self):
         for module in self.modules():
             for name in self.NAMES:
                 self.assertTrue(hasattr(module, name),
                                 f"{module.__name__} lacks {name}")
+
+    def test_every_name_the_controller_reads_exists_where_it_reads_it(self):
+        """Derived from controller.py itself, because the list above drifted.
+
+        SOFT_BLINK was added to both vocabulary modules and to neither
+        driver. The hand-written list did not mention it, the tests only
+        ever checked the vocabularies, and controller.py read it through
+        getattr with a default -- so --feedback blink was accepted and
+        nothing blinked, in silence. Three gaps lined up.
+
+        controller.py holds a surface two ways: `vocab` is the vocabulary,
+        which must work with nothing installed, and `mod`/`apc_mod` is the
+        driver. The distinction is the point -- Surface, the class, exists
+        only on a driver -- so each set is checked where it is read.
+        """
+        import re
+        with open(helper.os.path.join(helper.ROOT, "controller.py")) as handle:
+            source = handle.read()
+        by_handle = {}
+        for handle_name, attribute in re.findall(
+                r"\b(mod|apc_mod|vocab)\.([A-Za-z_]+)", source):
+            by_handle.setdefault(handle_name, set()).add(attribute)
+
+        self.assertIn("SOFT_BLINK", by_handle.get("mod", set()),
+                      "the regex stopped matching what build_leds reads")
+
+        import virtualapc
+        drivers = (virtualapc, APC_MODULE, XTOUCH_MODULE)
+        vocabularies = (surface_constants, xtouch_constants) + drivers
+
+        for name in ("mod", "apc_mod"):
+            for module in drivers:
+                missing = sorted(n for n in by_handle.get(name, ())
+                                 if not hasattr(module, n))
+                self.assertEqual(missing, [], f"{module.__name__}: {missing}")
+        for module in vocabularies:
+            missing = sorted(n for n in by_handle.get("vocab", ())
+                             if not hasattr(module, n))
+            self.assertEqual(missing, [], f"{module.__name__}: {missing}")
 
     def test_a_driver_re_exports_it_so_either_can_be_held(self):
         # surface_vocab() returns the driver when one is loaded, so the two
@@ -612,10 +655,65 @@ class TestLayerColumn(unittest.TestCase):
                       "f1,level,par*.dimmer,,,yes\n")
         self.assertIn("no layer", str(caught.exception))
 
-    def test_the_second_layer_falls_through_to_the_first(self):
+    def test_a_held_modifier_falls_through_to_the_base_layer(self):
+        # SHIFT is a way to reach a few extra things. Losing every other pad
+        # for as long as you hold it would be absurd, so an unbound shifted
+        # pad still does what it does unshifted.
         show = self.load("pad,type,target,mode,colour,shift\n"
                          "r0c0,scene,warm,toggle,red,\n")
         self.assertEqual(show.binding_for(0, 1).target, "warm")
+        self.assertEqual(show.layer(1)[0].target, "warm")
+
+    def test_a_latching_layer_does_not(self):
+        # The X-Touch's layer button LATCHES: page B is a page you stay on.
+        # Inheriting page A wherever B is blank means an unbound button
+        # fires something -- pressing p8 on B ran layer A's reload.
+        import os
+        path = helper.temp_show(mapping="")
+        self.addCleanup(shutil.rmtree, path)
+        with open(os.path.join(path, "mapping-xtouch.csv"), "w") as handle:
+            handle.write("pad,type,target,mode,layer\n"
+                         "bt1,scene,warm,toggle,a\n")
+        show = showfile.Show(path, surface=xtouch_constants)
+        show.load()
+        self.assertEqual(show.binding_for(8, 0).target, "warm")
+        self.assertIsNone(show.binding_for(8, 1))
+
+    def test_the_lamps_agree_with_what_will_fire(self):
+        # layer() paints and binding_for fires; if they disagreed a lamp
+        # would advertise a binding that does nothing, which is a worse lie
+        # than a dark button.
+        import os
+        path = helper.temp_show(mapping="")
+        self.addCleanup(shutil.rmtree, path)
+        with open(os.path.join(path, "mapping-xtouch.csv"), "w") as handle:
+            handle.write("pad,type,target,mode,layer\n"
+                         "bt1,scene,warm,toggle,a\n"
+                         "bt2,scene,half,toggle,b\n")
+        show = showfile.Show(path, surface=xtouch_constants)
+        show.load()
+        for index in (0, 1):
+            painted = show.layer(index)
+            for control in xtouch_constants.BUTTONS:
+                self.assertEqual(control in painted,
+                                 show.binding_for(control, index) is not None,
+                                 f"layer {index}, control {control}")
+
+    def test_a_master_missing_from_a_page_is_reported(self):
+        # The cost of no fall-through: binding the master on page A alone
+        # leaves the fader dead on page B. Load time is the place to find
+        # that out, not mid-set.
+        import os
+        path = helper.temp_show(mapping="")
+        self.addCleanup(shutil.rmtree, path)
+        with open(os.path.join(path, "mapping-xtouch.csv"), "w") as handle:
+            handle.write("pad,type,target,mode,layer\n"
+                         "f1,master,,,a\n")
+        show = showfile.Show(path, surface=xtouch_constants)
+        show.load()
+        said = [w for w in show.warnings if "master" in w]
+        self.assertEqual(len(said), 1, said)
+        self.assertIn("layer b", said[0])
 
     def test_an_unknown_layer_resolves_nothing(self):
         # The X-Touch at startup. Not a fallback to layer 0: that would fire
@@ -663,11 +761,14 @@ class TestFaderLayers(unittest.TestCase):
         self.assertIn((1, 0), eng.levels)
         self.assertIn((1, 1), eng.scales)
 
-    def test_a_binding_on_the_base_layer_serves_both(self):
-        # f1 is bound on layer a only, so it stays the master when the
-        # device is showing b -- the fall-through that stops a layer switch
-        # taking the master away.
-        self.assertEqual(self.show.fader_for(9, 1).kind, "master")
+    def test_a_binding_on_one_layer_does_not_serve_the_other(self):
+        # No fall-through on a LATCHING layer: page B is a page, not a
+        # modifier, and inheriting page A's bindings wherever B is blank
+        # fires the wrong thing -- an unbound button on B ran A's reload.
+        # The cost is that a control wanted on both layers is bound twice,
+        # which is one row and makes the file say what the surface does.
+        self.assertEqual(self.show.fader_for(9, 0).kind, "master")
+        self.assertIsNone(self.show.fader_for(9, 1))
 
 
 class TestPaintingAnXTouchLayout(unittest.TestCase):

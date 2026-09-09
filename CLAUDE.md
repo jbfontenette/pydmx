@@ -98,7 +98,12 @@ layer that happens not to be in front of you is worse than a dark surface
 for one gesture.
 
 **11. A control id is layer-independent; the binding key is
-`(control, layer)`.** Which physical numbers a layer uses is the surface's
+`(control, layer)`, and whether a layer falls through to the base one is the
+surface's business.** A HELD modifier falls through -- losing every pad for
+as long as SHIFT is down would be absurd. A LATCHING layer does not: it is a
+page you stay on, and inheriting the other page wherever it is blank fires
+the wrong thing. `LAYER_FALLS_THROUGH` says which, and `Show.layer()` must
+agree with `binding_for()` or a lamp advertises a binding that does nothing. Which physical numbers a layer uses is the surface's
 business alone. The X-Touch sends different notes and CCs per layer and its
 driver translates both ways, so `mapping-xtouch.csv` never mentions a layer B
 number and moving a binding between layers is a one-column edit. Anything in

@@ -43,7 +43,8 @@ from xtouch_constants import (               # noqa: F401 -- re-exported
     LED_NOTE, RING_CC, NAME, MAPPING_NAMES,
     PADS, BUTTONS, PUSHES, RINGS, FADERS, FADER_LAYERS,
     LAYERS, LAYER_NAMES, LAYER_AT_START, LAYER_HINT, BUTTON_SHOWS,
-    OFF, ON, IDLE, FEEDBACK,
+    LAYER_FALLS_THROUGH,
+    OFF, ON, IDLE, FEEDBACK, SOFT_BLINK,
     layer_index, layer_of, parse_control, describe_control,
     to_control, to_note, to_fader,
 )

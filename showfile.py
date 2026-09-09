@@ -748,9 +748,23 @@ def load_mapping(path, scenes, chasers=None, patch=None, warn=print,
              f"scenes -- SKIPPED, those pads do nothing: {lines}")
         warn(f"  scenes that do exist: {', '.join(scenes)}")
 
-    if not any(b.kind == "master" for b in faders.values()) and warn:
-        warn(f"{path}: no fader bound to 'master'. Add:  "
-             f"{surface.describe_control(('fader', 9))},master")
+    # Per layer where a layer does not fall through to the base one:
+    # binding the master on page A alone leaves the fader dead on page B,
+    # and finding that out mid-set is exactly the kind of surprise this
+    # file is meant to catch at load time.
+    layers = (range(surface.LAYERS) if not surface.LAYER_FALLS_THROUGH
+              else range(1))
+    for index in layers:
+        if any(b.kind == "master" for (_, lay), b in faders.items()
+               if lay == index):
+            continue
+        if warn:
+            where = surface.describe_control(("fader", 9))
+            column = (f",{surface.LAYER_NAMES[index]}" if index else "")
+            on = (f" on layer {surface.LAYER_NAMES[index]}"
+                  if len(layers) > 1 else "")
+            warn(f"{path}: no fader bound to 'master'{on}. Add:  "
+                 f"{where},master{column}")
 
     unbound = [n for n in scenes if not any(
         b.kind == "scene" and b.target == n for b in bindings.values())]
@@ -853,40 +867,48 @@ class Show:
         """
         return (self.stamps() if stamps is None else stamps) != self._stamps
 
-    def binding_for(self, control, layer):
-        """Binding for a control, falling back to the base layer.
+    def _resolve(self, table, key, layer):
+        """One lookup rule for buttons and continuous controls alike.
 
-        A second-layer press with nothing bound there falls through to the
-        base binding, so a layer only overrides where you actually defined
-        an override.
+        Whether a layer falls through to the base one is the SURFACE's
+        business, because the two mechanisms differ. The APC's SHIFT is
+        HELD, so falling through is right -- it is a way to reach a few
+        extra things, and losing every other pad for as long as you hold it
+        would be absurd. The X-Touch's layer LATCHES: it is a second page
+        you stay on, and a page that silently inherits the other page's
+        bindings wherever it is blank fires the wrong thing. Pressing an
+        unbound button on B ran layer A's reload before this existed.
 
         layer may be None -- on a surface whose layer is unknown until the
-        first press, which is invariant 10 applied to a latching layer
-        button. Nothing resolves until the device says where it is.
+        first press, which is invariant 10 applied to a latching switch.
+        Nothing resolves until the device says where it is.
         """
         if layer is None:
             return None
-        return (self.bindings.get((control, layer)) if layer else None) \
-            or self.bindings.get((control, 0))
+        found = table.get((key, layer))
+        if found is not None or not self.surface.LAYER_FALLS_THROUGH:
+            return found
+        return table.get((key, 0))
+
+    def binding_for(self, control, layer):
+        """Binding for a control on the layer showing."""
+        return self._resolve(self.bindings, control, layer)
 
     def fader_for(self, number, layer):
-        """Continuous control, with the same fall-through as binding_for.
-
-        The APC's faders are layer-less -- one CC whether or not SHIFT is
-        held -- so everything there binds at layer 0 and the fall-through is
-        what makes a press-and-hold not lose the master. On the X-Touch the
-        two layers really are different physical values the device
-        remembers, so both keys can be bound.
-        """
-        if layer is None:
-            return None
-        return (self.faders.get((number, layer)) if layer else None) \
-            or self.faders.get((number, 0))
+        """Continuous control, resolved by the same rule."""
+        return self._resolve(self.faders, number, layer)
 
     def layer(self, index):
-        """{control: binding} for the layer currently showing."""
+        """{control: binding} for the layer currently showing.
+
+        Must agree with binding_for, or a lamp would advertise a binding
+        that does not fire -- which is a worse lie than a dark button.
+        """
         if index is None:
             return {}
+        if not self.surface.LAYER_FALLS_THROUGH:
+            return {n: b for (n, lay), b in self.bindings.items()
+                    if lay == index}
         base = {n: b for (n, lay), b in self.bindings.items() if not lay}
         if not index:
             return base

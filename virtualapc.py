@@ -23,6 +23,7 @@ from surface_constants import (              # noqa: F401 -- re-exported
     OFF, IDLE, FEEDBACK,
     PADS, BUTTONS, RINGS, FADERS, FADER_LAYERS, LAYERS, LAYER_NAMES,
     LAYER_AT_START, LAYER_HINT, BUTTON_SHOWS, NAME, MAPPING_NAMES,
+    SOFT_BLINK, LAYER_FALLS_THROUGH,
     layer_index, parse_control, describe_control,
 )
 

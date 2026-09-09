@@ -1,3 +1,53 @@
+def test_seed(out, index):
+    """Does writing a ring also set the encoder's POSITION, or only its lamps?
+
+    THE QUESTION THIS ANSWERS is what to do about the startup jump. The
+    device cannot be asked where its encoders are sitting -- there is no
+    Introduction message here, the way the APC has one -- so the controller
+    starts not knowing, and the first touch of a `scale` encoder slams the
+    group from full to wherever the knob happens to be.
+
+    If a ring write moves the device's own idea of the value, the fix is
+    trivial and exact: at startup, push the show's value out to each bound
+    encoder and the knob IS where the show is. If it only lights LEDs, the
+    software has to do soft takeover instead -- ignore the encoder until it
+    passes through the value already in force.
+
+    Needs the input port too, which is why this is the one mode here that
+    opens both.
+    """
+    from xtouch_constants import RING_CC
+    import xtouch_dump
+
+    control = RING_CC["A"][index - 1]
+    port_name = xtouch_dump.find_port()
+    print(f"Encoder {index}: ring on CC {control}, watching input on")
+    print(f"'{port_name}'.\n")
+
+    with _open("in", port_name) as inp:
+        for _ in inp.iter_pending():
+            pass                            # drop anything already queued
+
+        cc(out, control, 0)
+        print("  Ring set to 0. Turn the encoder ONE CLICK to the RIGHT.")
+        wait("turned -- Enter")
+        first = [m.value for m in inp.iter_pending()
+                 if m.type == "control_change" and m.control == control]
+        print(f"  device sent: {first or 'nothing'}")
+
+        cc(out, control, 100)
+        print("\n  Ring set to 100. Turn ONE CLICK to the RIGHT again.")
+        wait("turned -- Enter")
+        second = [m.value for m in inp.iter_pending()
+                  if m.type == "control_change" and m.control == control]
+        print(f"  device sent: {second or 'nothing'}")
+
+    print("\n  Around 101 the second time: the write MOVED the encoder, and")
+    print("  the controller can seed it at startup -- no jump, ever.")
+    print("  Around 2 both times: the write only lit LEDs, the position is")
+    print("  the device's alone, and soft takeover is the only fix.")
+
+
 #!/usr/bin/env python3
 """
 Behringer X-Touch Mini LED output test.
@@ -8,6 +58,7 @@ Behringer X-Touch Mini LED output test.
     python3 xtouch_leds.py press 8     # does pressing a lit button darken it?
     python3 xtouch_leds.py rings       # which CC drives which encoder ring
     python3 xtouch_leds.py ring 11     # sweep the values of one ring CC
+    python3 xtouch_leds.py seed 1      # can the host SET an encoder's value?
     python3 xtouch_leds.py states 8    # what velocities does an LED accept?
     python3 xtouch_leds.py layers      # does an LED reach the inactive layer?
     python3 xtouch_leds.py off         # everything dark
@@ -386,6 +437,7 @@ TAKES_NUMBER = {
     "press": (test_press, _numbers(LED_NOTE["A"], LED_NOTE["B"]),
               "a button LED note"),
     "ring": (test_ring, _numbers(RING_CC["A"], RING_CC["B"]), "a ring CC"),
+    "seed": (test_seed, list(range(1, 9)), "an encoder 1-8"),
 }
 
 

@@ -85,6 +85,12 @@ LAYER_NAMES = ("", "shift")
 # unknowable until someone touches it.
 LAYER_AT_START = 0
 
+# A control with nothing bound on the shift layer falls through to its base
+# binding. Right for a HELD modifier: SHIFT is a way to reach a few extra
+# things, and losing every other pad for as long as you hold it would be
+# absurd. Wrong for a latching one -- see xtouch_constants.
+LAYER_FALLS_THROUGH = True
+
 # The APC's track and scene buttons show which controls are BOUND, and its
 # grid -- where the show actually lives -- shows active state in colour and
 # brightness. So these lamps are a map of the surface, not a state display.

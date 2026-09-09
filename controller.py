@@ -104,7 +104,11 @@ def blink_phase(style, mod, now=None):
     same reason chaser position is (invariant 4): a counter would drift
     against a repaint that only happens when something changes.
     """
-    rate = getattr(mod, "SOFT_BLINK", {}).get(style)
+    # mod.SOFT_BLINK, not getattr with a default. A surface module that is
+    # missing it is broken, and the default hid exactly that: the drivers
+    # did not re-export SOFT_BLINK, --feedback blink was accepted, and
+    # nothing blinked. Silence is the worst answer here.
+    rate = mod.SOFT_BLINK.get(style)
     if not rate:
         return None
     now = time.monotonic() if now is None else now
