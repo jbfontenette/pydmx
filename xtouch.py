@@ -43,7 +43,7 @@ from xtouch_constants import (               # noqa: F401 -- re-exported
     LED_NOTE, RING_CC, NAME, MAPPING_NAMES,
     PADS, BUTTONS, PUSHES, RINGS, FADERS, FADER_LAYERS,
     LAYERS, LAYER_NAMES, LAYER_AT_START, LAYER_HINT, BUTTON_SHOWS,
-    LAYER_FALLS_THROUGH,
+    LAYER_FALLS_THROUGH, PAINT_HIDDEN_LAYERS,
     OFF, ON, IDLE, FEEDBACK, SOFT_BLINK,
     layer_index, layer_of, parse_control, describe_control,
     to_control, to_note, to_fader,
@@ -166,26 +166,37 @@ class XTouch:
         self.button(control, self._desired[self.layer].get(control, 0))
 
     # --- output -----------------------------------------------------------
-    def button(self, control, state=1, force=False):
-        """Light or unlight one button, on the layer currently showing.
+    def button(self, control, state=1, force=False, layer=None):
+        """Light or unlight one button, on a given layer.
 
-        Binary: any non-zero state is on. Dropped when the layer is unknown,
-        because the note that would carry it means a different button on the
-        other layer and there is no safe guess.
+        Binary: any non-zero state is on. layer defaults to the one believed
+        to be showing; naming one explicitly is how the controller paints
+        every layer without knowing which is which.
+
+        A write to a layer that is NOT showing is discarded by the device,
+        so it cannot be cached -- and while the layer is unknown, that is
+        every write. Sending anyway is the whole trick: both pictures go
+        out, the device keeps the one that matters, and the surface is
+        correct without anybody having to know which layer that was.
         """
-        if self.layer is None:
+        target = self.layer if layer is None else layer
+        if target is None:
             return
         state = 1 if state else 0
-        self._desired[self.layer][control] = state
-        cache = self._delivered[self.layer]
-        if not force and cache.get(control) == state:
+        self._desired[target][control] = state
+        landed = target == self.layer
+        cache = self._delivered[target]
+        if landed and not force and cache.get(control) == state:
             return
-        cache[control] = state
+        if landed:
+            cache[control] = state
+        else:
+            cache.pop(control, None)
         self.out.send(mido.Message("note_on", channel=CHANNEL,
-                                   note=to_note(control, self.layer),
+                                   note=to_note(control, target),
                                    velocity=ON if state else OFF))
 
-    def ring(self, number, value, force=False):
+    def ring(self, number, value, force=False, layer=None):
         """Set an encoder's LED ring to a value 0-127.
 
         THIS ALSO MOVES THE ENCODER. Measured: with the knob at 7, setting
@@ -205,17 +216,22 @@ class XTouch:
         layer, made in X-Touch Editor. It cannot be set over MIDI, so a
         pan/tilt encoder wanting a dot has to be configured on the device.
         """
-        if self.layer is None:
+        target = self.layer if layer is None else layer
+        if target is None:
             return
         value = max(0, min(127, int(value)))
         key = ("ring", number)
-        cache = self._delivered[self.layer]
-        if not force and cache.get(key) == value:
+        landed = target == self.layer
+        cache = self._delivered[target]
+        if landed and not force and cache.get(key) == value:
             return
-        cache[key] = value
+        if landed:
+            cache[key] = value
+        else:
+            cache.pop(key, None)
         self.out.send(mido.Message(
             "control_change", channel=CHANNEL,
-            control=RING_CC[LAYER_NAMES[self.layer].upper()][number - 1],
+            control=RING_CC[LAYER_NAMES[target].upper()][number - 1],
             value=value))
 
     def pad(self, note, colour, behaviour=None, force=False):
@@ -235,20 +251,18 @@ class XTouch:
         return
 
     def clear(self):
-        """Everything off on the layer showing.
+        """Everything off, on every layer.
 
-        It cannot reach the other layer: writes to a hidden layer are
-        discarded by the device rather than stored, so lamps left lit there
-        stay lit until that layer is showing and something repaints it. On
-        exit that means the other layer keeps its last picture -- a hardware
-        limitation, not an oversight.
+        Both layers, because only one of the two writes will land and there
+        is no way to know which. That is also why this is worth doing on
+        exit: an earlier version cleared only the layer it believed was
+        showing, and left the other one lit after the process ended.
         """
-        if self.layer is None:
-            return
-        for control in BUTTONS:
-            self.button(control, 0, force=True)
-        for number in RINGS:
-            self.ring(number, 0, force=True)
+        for layer in range(LAYERS):
+            for control in BUTTONS:
+                self.button(control, 0, force=True, layer=layer)
+            for number in RINGS:
+                self.ring(number, 0, force=True, layer=layer)
 
     def refresh(self):
         """Forget what we believe the device holds, so the next paint

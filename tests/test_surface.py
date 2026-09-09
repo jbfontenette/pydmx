@@ -219,6 +219,23 @@ class TestSurfaceContract(unittest.TestCase):
         self.assertGreater(xtouch_constants.SOFT_BLINK["fast-blink"],
                            xtouch_constants.SOFT_BLINK["blink"])
 
+    def test_shared_lamps_are_painted_once_and_separate_lamps_per_layer(self):
+        """Which layers may be painted is decided by whether they share lamps.
+
+        Painting both on the APC would draw layer 0's picture and then
+        layer 1's over the same 64 pads -- the shift layer would show
+        permanently, on a device where SHIFT is a momentary key. Painting
+        only one on the X-Touch is what left the surface dark until
+        something was pressed.
+        """
+        self.assertFalse(surface_constants.PAINT_HIDDEN_LAYERS)
+        self.assertTrue(xtouch_constants.PAINT_HIDDEN_LAYERS)
+        # The reason, stated where it can be checked: shared versus separate.
+        self.assertEqual(set(surface_constants.PADS),
+                         set(surface_constants.PADS))     # one set of pads
+        self.assertFalse(set(xtouch_constants.LED_NOTE["A"]) &
+                         set(xtouch_constants.LED_NOTE["B"]))
+
     def test_only_a_surface_with_pads_has_an_idle_brightness(self):
         # IDLE collapses to OFF where a lamp cannot be dimmed, which is the
         # honest way to say the APC's idle-glow scheme has no equivalent.
@@ -544,6 +561,54 @@ class TestXTouchPainting(unittest.TestCase):
             events = device.poll()
         self.assertEqual(events, [("fader", 9, 100)])
 
+    def test_a_write_to_a_hidden_layer_is_never_cached(self):
+        # The device DISCARDS it, so believing it landed would suppress the
+        # re-send that is the entire point -- the surface would go stale on
+        # exactly the layer nobody has confirmed.
+        device, patch = make_xtouch([note_on(8)])
+        with patch:
+            device.poll()                       # now believes layer A
+            device.button(10, 1, layer=1)       # ...paint the hidden one
+            before = len(self.lit(device))
+            device.button(10, 1, layer=1)       # again: must re-send
+        self.assertEqual(len(self.lit(device)), before + 1)
+
+    def test_the_showing_layer_is_still_cached(self):
+        device, patch = make_xtouch([note_on(8)])
+        with patch:
+            device.poll()
+            device.button(10, 1, layer=0)
+            before = len(self.lit(device))
+            device.button(10, 1, layer=0)
+        self.assertEqual(len(self.lit(device)), before)
+
+    def test_both_layers_can_be_painted_before_one_is_known(self):
+        # Startup. Nothing has arrived, so neither layer is confirmed, and
+        # both notes go out for the same control -- 10 and 34.
+        device, patch = make_xtouch()
+        with patch:
+            self.assertIsNone(device.layer)
+            device.button(10, 1, layer=0)
+            device.button(10, 1, layer=1)
+        self.assertEqual(self.lit(device),
+                         [(10, xtouch_constants.ON),
+                          (34, xtouch_constants.ON)])
+
+    def test_clear_reaches_both_layers(self):
+        # Only one of the two writes lands and there is no telling which, so
+        # both are sent. An earlier version cleared the layer it believed
+        # was showing and left the other one lit after the process ended.
+        device, patch = make_xtouch([note_on(8)])
+        with patch:
+            device.poll()
+            device.out.sent.clear()
+            device.clear()
+        off = {m.note for m in device.out.sent
+               if m.type == "note_on" and m.velocity == 0}
+        for layer in ("A", "B"):
+            self.assertTrue(set(xtouch_constants.LED_NOTE[layer]) <= off,
+                            layer)
+
     def test_asking_for_a_colour_pad_is_an_error_not_a_no_op(self):
         # build_leds only calls pad() when PADS is non-empty, so reaching
         # here means a caller assumed a grid. Silence would hide that until
@@ -789,21 +854,34 @@ class TestPaintingAnXTouchLayout(unittest.TestCase):
                "f1,master,,,a\n")
 
     class Recorder:
-        """A surface that records what it was asked to paint."""
+        """A surface that records what it was asked to paint, per layer."""
 
         def __init__(self):
-            self.buttons = {}
-            self.rings = {}
+            self.by_layer = {}
             self.pads = []
 
-        def button(self, control, state=1, force=False):
-            self.buttons[control] = state
+        def _for(self, layer):
+            return self.by_layer.setdefault(layer, {"buttons": {},
+                                                    "rings": {}})
 
-        def ring(self, number, value, force=False):
-            self.rings[number] = value
+        def button(self, control, state=1, force=False, layer=0):
+            self._for(layer)["buttons"][control] = state
+
+        def ring(self, number, value, force=False, layer=0):
+            self._for(layer)["rings"][number] = value
 
         def pad(self, *args, **kwargs):
             self.pads.append(args)
+
+        # The tests below were written before painting went per layer, and
+        # read as if there were one picture. Layer 0 is that picture.
+        @property
+        def buttons(self):
+            return self._for(0)["buttons"]
+
+        @property
+        def rings(self):
+            return self._for(0)["rings"]
 
     def setUp(self):
         import os
@@ -830,10 +908,24 @@ class TestPaintingAnXTouchLayout(unittest.TestCase):
         # raises, deliberately, and reaching it would take the show down.
         self.assertEqual(self.paint(0).pads, [])
 
-    def test_an_unknown_layer_paints_nothing(self):
+    def test_an_unknown_layer_paints_every_layer(self):
+        # The cure for a dark surface at startup. Each layer has its own
+        # lamps and the device DISCARDS writes to the one it is not showing,
+        # so both pictures go out and the device keeps the one that matters.
+        # Nobody has to know which that was.
         surface = self.paint(None)
-        self.assertEqual(surface.buttons, {})
-        self.assertEqual(surface.rings, {})
+        for layer in range(xtouch_constants.LAYERS):
+            painted = surface.by_layer[layer]["buttons"]
+            self.assertEqual(set(painted), set(xtouch_constants.BUTTONS),
+                             f"layer {layer} not painted")
+
+    def test_each_layer_is_painted_with_its_own_bindings(self):
+        # Sending both pictures is only safe because they are the RIGHT
+        # pictures. bt1 is 'warm' on layer a and 'half' on layer b.
+        self.eng.activate("half")
+        surface = self.paint(None)
+        self.assertEqual(surface.by_layer[0]["buttons"][8], 0)
+        self.assertEqual(surface.by_layer[1]["buttons"][8], 1)
 
     def test_bound_buttons_are_dark_until_their_target_is_active(self):
         # BUTTON_SHOWS is "active" here: a binary lamp cannot say "bound"
@@ -849,11 +941,16 @@ class TestPaintingAnXTouchLayout(unittest.TestCase):
         surface = self.paint(0)
         self.assertEqual(set(surface.buttons), set(xtouch_constants.BUTTONS))
 
-    def test_the_other_layer_is_not_painted(self):
+    def test_a_named_layer_still_paints_them_all(self):
+        # Knowing the layer changes nothing about what is SENT here -- only
+        # the driver's caching, which is what makes the showing layer cheap
+        # and the hidden one unconditional. Painting all of them is also
+        # what fixes a layer switched by hand, which this device never
+        # reports: the next repaint puts the right picture on it.
         self.eng.activate("half")
-        # bt1 on layer b is 'half'; on layer a it is 'warm'.
-        self.assertEqual(self.paint(1).buttons[8], 1)
-        self.assertEqual(self.paint(0).buttons[8], 0)
+        surface = self.paint(0)
+        self.assertEqual(surface.by_layer[0]["buttons"][8], 0)
+        self.assertEqual(surface.by_layer[1]["buttons"][8], 1)
 
     def test_a_level_encoder_shows_the_engine_s_value_not_the_knob_s(self):
         # The point of ring feedback: after a reload the device still holds

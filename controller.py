@@ -131,19 +131,36 @@ def build_leds(surface, show, eng, style="intensity", layer=0, now=None):
     show a value. A device with no grid has PADS empty and the loop simply
     does not run.
 
-    layer None means the surface has not said which layer it is showing --
-    the X-Touch at startup. Nothing is painted, because lighting the layer
-    that happens not to be in front of you is worse than a dark surface for
-    one gesture. Invariant 10, applied to a latching layer button.
+    WHICH LAYERS get painted comes from the surface too. Where each layer
+    has its own physical lamps and the device DISCARDS writes to the one it
+    is not showing -- the X-Touch -- every layer is painted every time, and
+    the device keeps the one that matters. So the layer need not be known to
+    paint correctly, which is what makes the surface right at startup
+    instead of dark until something is pressed, and right again after the
+    layer is switched by hand, which the device never reports.
+
+    Where the layers SHARE lamps -- the APC, whose SHIFT layer paints the
+    same 64 pads -- only the one showing can be painted, because two
+    pictures on one set of lamps is a contradiction rather than a choice.
     """
     mod = surface_module()
     import colours
 
-    if layer is None:
+    if mod.PAINT_HIDDEN_LAYERS:
+        targets = range(mod.LAYERS)
+    elif layer is None:
         return
+    else:
+        targets = [layer]
 
-    visible = show.layer(layer)
     phase = blink_phase(style, mod, now)
+    for index in targets:
+        _paint_layer(surface, show, eng, style, index, phase, mod, colours)
+
+
+def _paint_layer(surface, show, eng, style, layer, phase, mod, colours):
+    """One layer's worth of lamps. Called once, or once per layer."""
+    visible = show.layer(layer)
 
     def is_on(binding):
         # Chasers light exactly like scenes -- is_active() covers both, so
@@ -179,7 +196,7 @@ def build_leds(surface, show, eng, style="intensity", layer=0, now=None):
     for note in mod.BUTTONS:
         binding = visible.get(note)
         if binding is None:
-            surface.button(note, 0)
+            surface.button(note, 0, layer=layer)
         elif mod.BUTTON_SHOWS == "active":
             # A binary lamp cannot show "bound" and "active" at once. Where
             # the buttons ARE the surface, active is the one worth having:
@@ -190,15 +207,15 @@ def build_leds(surface, show, eng, style="intensity", layer=0, now=None):
                 # either way, and blinking every bound button would turn the
                 # surface into a strobe that says nothing.
                 lit = lit and phase
-            surface.button(note, 1 if lit else 0)
+            surface.button(note, 1 if lit else 0, layer=layer)
         else:
-            surface.button(note, 1)
+            surface.button(note, 1, layer=layer)
 
     for number in mod.RINGS:
         binding = show.fader_for(number, layer)
         value = fader_value(binding, number, eng)
         if value is not None:
-            surface.ring(number, value)
+            surface.ring(number, value, layer=layer)
 
 
 def fader_value(binding, number, eng):

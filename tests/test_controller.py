@@ -436,6 +436,18 @@ class TestChaserFreezeRouting(unittest.TestCase):
         self.assertTrue(self.eng.is_active("timed"))
         self.assertEqual(self.eng.chaser_position("timed"), (1, 2))
 
+    def test_only_the_showing_layer_is_painted_on_shared_lamps(self):
+        # The APC's two layers are the SAME 64 pads. Painting both would
+        # draw the base picture and then the shift picture over it, so the
+        # shift layer would show permanently on a momentary modifier.
+        surface = _Recorder()
+        controller.build_leds(surface, self.show, self.eng, "intensity", 0)
+        painted = set(surface.pads)
+        self.assertTrue(painted)
+        surface = _Recorder()
+        controller.build_leds(surface, self.show, self.eng, "intensity", 1)
+        self.assertEqual(set(surface.pads), painted)
+
     def test_the_pad_lights_while_the_rig_is_held(self):
         # A held rig looks identical to a running one from the front, so
         # this pad is the only thing that can say so. Bound-but-idle already
@@ -460,7 +472,7 @@ class _Recorder:
     def pad(self, note, colour, behaviour=0, force=False):
         self.pads[note] = (behaviour, colour)
 
-    def button(self, note, state=1, force=False):
+    def button(self, note, state=1, force=False, layer=None):
         pass
 
     def pads_rgb(self, entries):

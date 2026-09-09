@@ -94,11 +94,15 @@ inside `_parse()`, never assigned directly.
 
 **10. Fail safe on unknown state.** When the surface does not report its
 fader positions, master starts at **0**, not 255. An unexpected blackout
-costs one gesture; an unexpected full blast in a venue does not. The same
-rule covers the X-Touch's layer: it never says which one it is showing, so
-nothing is painted until the first press says where we are -- lighting the
-layer that happens not to be in front of you is worse than a dark surface
-for one gesture.
+costs one gesture; an unexpected full blast in a venue does not.
+
+The X-Touch's unknown LAYER used to be handled the same defensive way --
+paint nothing until a press says where we are -- but it does not have to be.
+Each layer has its own lamps and the device DISCARDS writes to the one it is
+not showing, so `PAINT_HIDDEN_LAYERS` paints every layer every time and the
+device keeps the one that matters. Unknown state with no bad outcome does
+not need a defensive answer; look for the fact that removes the uncertainty
+before settling for the safe-but-worse behaviour.
 
 **11. A control id is layer-independent; the binding key is
 `(control, layer)`, and whether a layer falls through to the base one is the

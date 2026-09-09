@@ -20,7 +20,7 @@ from surface_constants import (              # noqa: F401 -- re-exported
     OFF, IDLE, FEEDBACK,
     PADS, BUTTONS, RINGS, FADERS, FADER_LAYERS, LAYERS, LAYER_NAMES,
     LAYER_AT_START, LAYER_HINT, BUTTON_SHOWS, NAME, MAPPING_NAMES,
-    SOFT_BLINK, LAYER_FALLS_THROUGH,
+    SOFT_BLINK, LAYER_FALLS_THROUGH, PAINT_HIDDEN_LAYERS,
     layer_index, parse_control, describe_control,
 )
 
@@ -119,11 +119,15 @@ class APC:
         self.out.send(mido.Message(
             "sysex", data=[0x47, 0x7F, 0x4F, 0x24, n >> 7, n & 0x7F] + data))
 
-    def button(self, note, state=1, force=False):
+    def button(self, note, state=1, force=False, layer=None):
         """Single-colour UI buttons. Always channel 0.
 
         state 0 off, 1 on, 2 blink. Colour is fixed in hardware: track red,
         scene launch green. SHIFT has no LED and cannot be lit.
+
+        layer is accepted and ignored: this device's two layers share one
+        set of lamps, so there is only ever one picture to paint. It exists
+        so the caller does not have to know which kind of surface it holds.
         """
         key = ("button", state)
         if not force and self._led.get(note) == key:

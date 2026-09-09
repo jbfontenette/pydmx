@@ -23,7 +23,7 @@ from surface_constants import (              # noqa: F401 -- re-exported
     OFF, IDLE, FEEDBACK,
     PADS, BUTTONS, RINGS, FADERS, FADER_LAYERS, LAYERS, LAYER_NAMES,
     LAYER_AT_START, LAYER_HINT, BUTTON_SHOWS, NAME, MAPPING_NAMES,
-    SOFT_BLINK, LAYER_FALLS_THROUGH,
+    SOFT_BLINK, LAYER_FALLS_THROUGH, PAINT_HIDDEN_LAYERS,
     layer_index, parse_control, describe_control,
 )
 
@@ -96,7 +96,9 @@ class VirtualAPC:
         self._led[note] = key
         self.link.send(simlink.encode_leds([(note, colour, behaviour)]))
 
-    def button(self, note, state=1, force=False):
+    def button(self, note, state=1, force=False, layer=None):
+        # layer ignored, as on the real device: one set of lamps, one
+        # picture. See apc.APC.button.
         key = ("button", state)
         if not force and self._led.get(note) == key:
             return

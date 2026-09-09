@@ -323,6 +323,15 @@ LAYER_AT_START = None
 # -- one extra row, and the file then says what the surface does.
 LAYER_FALLS_THROUGH = False
 
+# Each layer has its OWN lamps, and a write to the layer that is not showing
+# is discarded rather than stored -- both measured. So painting every layer
+# every time is free of consequence, and the device keeps the one that
+# matters. That is what removes the need to know which layer is showing in
+# order to paint it correctly: right at startup instead of dark until
+# something is pressed, and right again after the layer is switched by hand,
+# which this device never reports.
+PAINT_HIDDEN_LAYERS = True
+
 # These sixteen lamps ARE the surface: there is no grid behind them. So they
 # show what is ACTIVE rather than what is bound. A binary lamp cannot do
 # both, and mid-set you need to see what is running -- the layout you learn.

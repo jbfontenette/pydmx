@@ -281,9 +281,13 @@ before you lay a show out:
   wrong thing. Bind a control on both layers if you want it on both — the
   loader warns if `master` is missing from a page.
 
-- **The surface stays dark until you press something.** The device never says
-  which layer it is showing and cannot be asked, so at startup the controller
-  does not know. Lighting the wrong layer would be worse; one press fixes it.
+- **The LEDs are right from the start, without pressing anything.** The
+  device never says which layer it is showing and cannot be asked — but each
+  layer has its own lamps and it *discards* writes aimed at the layer it is
+  not showing. So the controller paints both layers every time and the
+  device keeps the one that matters. Switching layer by hand is covered by
+  the same thing: the next repaint puts the right picture on whichever layer
+  you moved to.
 - **A bound button looks exactly like an unbound one.** These lamps are
   binary — no brightness steps, no blink — so the APC's dim-when-bound,
   bright-when-active scheme has no equivalent. The buttons show what is

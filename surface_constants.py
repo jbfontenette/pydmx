@@ -91,6 +91,12 @@ LAYER_AT_START = 0
 # absurd. Wrong for a latching one -- see xtouch_constants.
 LAYER_FALLS_THROUGH = True
 
+# Both layers paint the same 64 pads, so only the one showing can be drawn:
+# two pictures on one set of lamps is a contradiction, not a choice. On a
+# device whose layers have their own lamps -- see xtouch_constants -- every
+# layer is painted every time and the device keeps the one that matters.
+PAINT_HIDDEN_LAYERS = False
+
 # The APC's track and scene buttons show which controls are BOUND, and its
 # grid -- where the show actually lives -- shows active state in colour and
 # brightness. So these lamps are a map of the surface, not a state display.
